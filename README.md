@@ -39,9 +39,38 @@ resolution.
 | `Look/ColorMath.swift` | HSV conversion, tone curves, black point, vibrance |
 | `Camera/CameraModel.swift` | Capture session, shutter, save |
 | `Camera/CIImage+Square.swift` | The centred 1:1 crop shared by preview and capture |
-| `Presets/PresetStore.swift` | Saved looks on disk, and the zip bundle |
+| `Camera/PhotoEncoder.swift` | JPEG encoding, and the settings embedded in EXIF |
+| `Library/ShotStore.swift` | Every shot on disk, and the zip bundle |
+| `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
 | `Views/FilterPanel.swift` | The slider editor and its action bar |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
+
+## Every photo carries its settings
+
+Captures are JPEG, and each one is written with the profile that made it in
+the EXIF user comment (about 750 bytes of JSON, ~1% of what an EXIF block
+holds), alongside the camera's own exposure and lens metadata. That happens on
+every shot whether or not the filter editor was ever opened, so any file
+leaving the app — camera roll, share sheet, bundle — describes itself.
+
+The profile decodes leniently: a key that isn't in the JSON keeps its default
+instead of failing the whole decode, so shots saved by an older build still
+load after new knobs are added.
+
+## The roll
+
+Every capture is written twice: to the camera roll, and to the app's own store
+in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
+along the bottom edge reads the store, which is why it shows only frames Snap
+took. It holds 20 at a time with **Load More** for the rest.
+
+Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
+that returns to the live preview. Long-press for **Use Filter Data** (puts that
+shot's settings back on the sliders), **Share Image**, or **Delete Image**.
+
+Storing full-resolution copies is what makes Bundle and Share work on the
+original file rather than a thumbnail; it also means the app's storage grows
+with use, and Delete is the way to reclaim it.
 
 ## The filter editor
 
@@ -54,15 +83,13 @@ A sticky bar sits under the sliders:
 
 | Button | Does |
 | --- | --- |
-| **Snap** | Same as the shutter — graded photo to the camera roll |
-| **Save** | Captures a frame *and* the settings that made it, then asks for a title (defaults to the timestamp) and notes |
-| **Load** | Saved looks as cards, newest first. Tap to put one back on the sliders; swipe to delete |
-| **Bundle** | Zips every saved image and settings file and hands it to the share sheet |
+| **Snap** | Same as the shutter |
+| **Save** | Takes a shot and then asks for a title (defaults to the timestamp) and notes |
+| **Load** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
+| **Bundle** | Zips every image and settings file and hands it to the share sheet |
 
-Save and Snap are deliberately different: Snap goes to the camera roll, Save
-goes to the app's own store so Bundle has something to collect. Saved entries
-live in `Documents/Snaps` as a matched `<uuid>.json` and `<uuid>.heic` per
-entry — flat and readable, which is why Bundle is just a zip of the folder.
+Snap and Save both capture, store, and save to the camera roll — the only
+difference is that Save ends at the naming sheet.
 
 ### Keeping sliders responsive
 

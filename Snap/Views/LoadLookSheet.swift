@@ -1,37 +1,37 @@
 //
-//  LoadPresetSheet.swift
+//  LoadLookSheet.swift
 //  Snap
 //
-//  Every saved moment, newest first. Tap one to put its settings back on the
-//  sliders.
+//  Every shot the app has taken, newest first. Tap one to put the settings it
+//  was taken with back on the sliders.
 //
 
 import SwiftUI
 import UIKit
 
-struct LoadPresetSheet: View {
+struct LoadLookSheet: View {
 
-    @ObservedObject var store: PresetStore
-    var onSelect: (Preset) -> Void
+    @ObservedObject var store: ShotStore
+    var onSelect: (Shot) -> Void
     var onCancel: () -> Void
 
     var body: some View {
         NavigationStack {
             Group {
-                if store.presets.isEmpty {
-                    ContentUnavailableView("No Saved Looks",
+                if store.shots.isEmpty {
+                    ContentUnavailableView("No Shots Yet",
                                            systemImage: "camera.filters",
-                                           description: Text("Use Save in the filter panel to keep a look and the frame it made."))
+                                           description: Text("Every photo you take keeps the settings that made it."))
                 } else {
                     List {
-                        ForEach(store.presets) { preset in
-                            Button { onSelect(preset) } label: {
-                                PresetCard(store: store, preset: preset)
+                        ForEach(store.shots) { shot in
+                            Button { onSelect(shot) } label: {
+                                ShotRow(store: store, shot: shot)
                             }
                             .buttonStyle(.plain)
                         }
                         .onDelete { offsets in
-                            offsets.map { store.presets[$0] }.forEach(store.delete)
+                            offsets.map { store.shots[$0] }.forEach(store.delete)
                         }
                     }
                     .listStyle(.plain)
@@ -48,10 +48,10 @@ struct LoadPresetSheet: View {
     }
 }
 
-private struct PresetCard: View {
+private struct ShotRow: View {
 
-    @ObservedObject var store: PresetStore
-    let preset: Preset
+    @ObservedObject var store: ShotStore
+    let shot: Shot
 
     @State private var thumbnail: UIImage? = nil
 
@@ -76,16 +76,16 @@ private struct PresetCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(preset.title)
+                Text(shot.displayTitle)
                     .font(.system(size: 15, weight: .medium))
                     .lineLimit(1)
 
-                Text(Self.dateFormatter.string(from: preset.createdAt))
+                Text(Self.dateFormatter.string(from: shot.createdAt))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                if !preset.notes.isEmpty {
-                    Text(preset.notes)
+                if !shot.notes.isEmpty {
+                    Text(shot.notes)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -95,11 +95,11 @@ private struct PresetCard: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
-        .task(id: preset.id) {
+        .task(id: shot.id) {
             guard thumbnail == nil else { return }
-            let url = store.imageURL(for: preset)
+            let url = store.imageURL(for: shot)
             thumbnail = await Task.detached(priority: .userInitiated) {
-                PresetStore.thumbnail(at: url, maxPixelSize: 180)
+                ShotStore.image(at: url, maxPixelSize: 180)
             }.value
         }
     }

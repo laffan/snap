@@ -1,25 +1,26 @@
 //
-//  Preset.swift
+//  Shot.swift
 //  Snap
 //
-//  A saved moment: the look, the frame it produced, and what you called it.
+//  One photograph the app has taken, and the look that made it.
 //
 
 import Foundation
 
-struct Preset: Codable, Identifiable, Equatable {
+struct Shot: Codable, Identifiable, Equatable {
     var id: UUID
+    /// Empty until the shot is named. The strip and the load list fall back to
+    /// the timestamp.
     var title: String
     var notes: String
     var createdAt: Date
-    /// File name of the frame captured alongside these settings, relative to
-    /// the store's directory.
+    /// File name of the frame, relative to the store's directory.
     var imageFileName: String
     var profile: PositiveFilmProfile
 
     init(id: UUID = UUID(),
-         title: String,
-         notes: String,
+         title: String = "",
+         notes: String = "",
          createdAt: Date = Date(),
          imageFileName: String,
          profile: PositiveFilmProfile) {
@@ -31,8 +32,12 @@ struct Preset: Codable, Identifiable, Equatable {
         self.profile = profile
     }
 
-    /// The title offered when the user hasn't typed one.
-    static func defaultTitle(for date: Date = Date()) -> String {
+    /// What to show when the shot hasn't been given a name.
+    var displayTitle: String {
+        title.isEmpty ? Shot.timestamp(for: createdAt) : title
+    }
+
+    static func timestamp(for date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)

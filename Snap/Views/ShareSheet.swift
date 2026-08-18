@@ -6,7 +6,7 @@
 import SwiftUI
 import UIKit
 
-/// Hands a finished bundle to the system share sheet.
+/// Hands a file — a single photo, or a whole bundle — to the system share sheet.
 struct ShareSheet: UIViewControllerRepresentable {
 
     let url: URL
@@ -19,7 +19,7 @@ struct ShareSheet: UIViewControllerRepresentable {
 }
 
 /// `sheet(item:)` needs something Identifiable, and a bare URL isn't.
-struct BundleFile: Identifiable {
+struct ShareItem: Identifiable {
     let id = UUID()
     let url: URL
 }

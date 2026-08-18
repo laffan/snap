@@ -29,15 +29,9 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var isShutterFlashing = false
     @Published var errorMessage: String? = nil
 
-    /// Set when a `.preset` capture completes; drives the save sheet.
-    @Published var pendingSave: PendingSave? = nil
-
-    struct PendingSave: Identifiable {
-        let id = UUID()
-        var imageData: Data
-        var imageType: UTType
-        var profile: PositiveFilmProfile
-    }
+    /// Set when a capture that asked to be named completes; drives the save
+    /// sheet.
+    @Published var pendingTitle: Shot? = nil
 
     let renderer = PreviewRenderer()
 
@@ -50,19 +44,17 @@ final class CameraModel: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.snap.session")
     private let videoQueue = DispatchQueue(label: "com.snap.video", qos: .userInitiated)
 
-    /// Where the next frame is headed. A capture is only ever in flight one at
-    /// a time (`isCapturing` guards it), so a single slot is enough.
-    enum Destination {
-        /// Straight to the camera roll, as the shutter button does.
-        case cameraRoll
-        /// Handed back for a save sheet, together with the look that made it.
-        case preset
-    }
-
     /// The live look. Owned here, observed by the filter panel.
     let look = LookModel()
 
-    private var destination: Destination = .cameraRoll
+    /// Everything the app has shot. Every capture lands here as well as in the
+    /// camera roll, which is what the film strip reads from.
+    let store = ShotStore()
+
+    /// Whether the capture in flight should end at the naming sheet.
+    /// Only one capture runs at a time (`isCapturing` guards it), so a single
+    /// slot is enough.
+    private var wantsTitle = false
     /// The profile as it stood when the shutter fired, so later slider moves
     /// can't change what gets written.
     private var capturedProfile = PositiveFilmProfile()
@@ -175,10 +167,13 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: - Capture
 
-    func capture(to destination: Destination = .cameraRoll) {
+    /// Takes a photo. Every capture is written as a JPEG carrying its own
+    /// settings in EXIF, saved to the camera roll, and recorded in the store.
+    /// `titled` only decides whether the naming sheet follows.
+    func capture(titled: Bool = false) {
         guard state == .running, !isCapturing else { return }
         isCapturing = true
-        self.destination = destination
+        wantsTitle = titled
         capturedProfile = look.profile
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -263,55 +258,27 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         // running on a draft one mid-drag.
         let profile = capturedProfile
         let graded = look.finalFilter(for: profile).apply(to: raw.centerSquareCropped())
-        let destination = self.destination
+        let sourceMetadata = photo.metadata
+        let wantsTitle = self.wantsTitle
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                let encoded = try self.encode(graded)
-                switch destination {
-                case .cameraRoll:
-                    try await self.library.save(encoded.data, type: encoded.type)
-                case .preset:
-                    let pending = PendingSave(imageData: encoded.data,
-                                              imageType: encoded.type,
-                                              profile: profile)
-                    await MainActor.run { self.pendingSave = pending }
+                let jpeg = try PhotoEncoder.jpeg(from: graded,
+                                                 profile: profile,
+                                                 sourceMetadata: sourceMetadata,
+                                                 context: self.stillContext)
+
+                let shot = try self.store.add(imageData: jpeg, profile: profile)
+                try await self.library.save(jpeg, type: .jpeg)
+
+                if wantsTitle {
+                    await MainActor.run { self.pendingTitle = shot }
                 }
                 self.finishCapture(error: nil)
             } catch {
                 self.finishCapture(error: error.localizedDescription)
             }
         }
-    }
-
-    private struct EncodedPhoto {
-        var data: Data
-        var type: UTType
-    }
-
-    private enum EncodingError: LocalizedError {
-        case failed
-        var errorDescription: String? { "The photo could not be saved." }
-    }
-
-    private func encode(_ image: CIImage) throws -> EncodedPhoto {
-        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-        let options: [CIImageRepresentationOption: Any] = [
-            CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.95
-        ]
-
-        if let data = stillContext.heifRepresentation(of: image,
-                                                      format: .RGBA8,
-                                                      colorSpace: colorSpace,
-                                                      options: options) {
-            return EncodedPhoto(data: data, type: .heic)
-        }
-        if let data = stillContext.jpegRepresentation(of: image,
-                                                      colorSpace: colorSpace,
-                                                      options: options) {
-            return EncodedPhoto(data: data, type: .jpeg)
-        }
-        throw EncodingError.failed
     }
 }

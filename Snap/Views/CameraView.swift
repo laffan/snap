@@ -2,8 +2,8 @@
 //  CameraView.swift
 //  Snap
 //
-//  Preview at the top. Below it either the shutter, or the filter editor that
-//  replaces it.
+//  Preview at the top. Below it either the shutter and the app's own roll, or
+//  the filter editor that replaces them.
 //
 
 import SwiftUI
@@ -12,28 +12,40 @@ import UIKit
 struct CameraView: View {
 
     @StateObject private var camera = CameraModel()
-    @StateObject private var store = PresetStore()
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var isEditingFilter = false
-    @State private var isLoading = false
-    @State private var bundle: BundleFile? = nil
+    @State private var isLoadingLook = false
+    @State private var share: ShareItem? = nil
+    /// A saved frame being viewed in place of the live preview.
+    @State private var viewing: Shot? = nil
+
+    private var store: ShotStore { camera.store }
 
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                previewFrame(edge: geometry.size.width)
+                viewer(edge: geometry.size.width)
 
                 if isEditingFilter {
                     FilterPanel(look: camera.look,
                                 isBusy: camera.isCapturing,
-                                onSnap: { camera.capture(to: .cameraRoll) },
-                                onSave: { camera.capture(to: .preset) },
-                                onLoad: { isLoading = true },
+                                onSnap: { camera.capture() },
+                                onSave: { camera.capture(titled: true) },
+                                onLoad: { isLoadingLook = true },
                                 onBundle: makeBundle,
-                                onClose: { withAnimation(.easeInOut(duration: 0.22)) { isEditingFilter = false } })
+                                onClose: { setEditing(false) })
                 } else {
-                    shutterRow
+                    Spacer(minLength: 0)
+                    controlRow
+                    Spacer(minLength: 0)
+                    FilmStrip(store: store,
+                              selection: viewing,
+                              onSelect: { viewing = $0 },
+                              onUseLook: useLook,
+                              onShare: { share = ShareItem(url: store.imageURL(for: $0)) },
+                              onDelete: delete)
+                        .padding(.bottom, 10)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -50,22 +62,24 @@ struct CameraView: View {
             default:          break
             }
         }
-        .sheet(item: $camera.pendingSave) { pending in
-            SavePresetSheet(image: UIImage(data: pending.imageData),
-                            onCancel: { camera.pendingSave = nil },
-                            onSave: { title, notes in
-                                save(pending, title: title, notes: notes)
-                            })
+        .sheet(item: $camera.pendingTitle) { shot in
+            SaveShotSheet(store: store,
+                          shot: shot,
+                          onCancel: { camera.pendingTitle = nil },
+                          onSave: { title, notes in
+                              store.update(shot, title: title, notes: notes)
+                              camera.pendingTitle = nil
+                          })
         }
-        .sheet(isPresented: $isLoading) {
-            LoadPresetSheet(store: store,
-                            onSelect: { preset in
-                                camera.look.apply(preset)
-                                isLoading = false
-                            },
-                            onCancel: { isLoading = false })
+        .sheet(isPresented: $isLoadingLook) {
+            LoadLookSheet(store: store,
+                          onSelect: { shot in
+                              useLook(shot)
+                              isLoadingLook = false
+                          },
+                          onCancel: { isLoadingLook = false })
         }
-        .sheet(item: $bundle) { ShareSheet(url: $0.url) }
+        .sheet(item: $share) { ShareSheet(url: $0.url) }
         .alert("Something went wrong",
                isPresented: Binding(get: { camera.errorMessage != nil },
                                     set: { if !$0 { camera.errorMessage = nil } }),
@@ -76,20 +90,15 @@ struct CameraView: View {
         }
     }
 
-    // MARK: - Preview
+    // MARK: - Viewer
 
     @ViewBuilder
-    private func previewFrame(edge: CGFloat) -> some View {
+    private func viewer(edge: CGFloat) -> some View {
         ZStack {
-            switch camera.state {
-            case .running:
-                CameraPreview(renderer: camera.renderer)
-            case .starting:
-                Color.black
-            case .denied:
-                message("Snap needs access to your camera.", showsSettingsLink: true)
-            case .failed(let reason):
-                message(reason, showsSettingsLink: false)
+            if let viewing {
+                ShotView(store: store, shot: viewing, edge: edge)
+            } else {
+                livePreview
             }
 
             // A short black blink, the way a mechanical shutter reads.
@@ -101,18 +110,34 @@ struct CameraView: View {
         .clipped()
     }
 
-    // MARK: - Shutter
+    @ViewBuilder
+    private var livePreview: some View {
+        switch camera.state {
+        case .running:
+            CameraPreview(renderer: camera.renderer)
+        case .starting:
+            Color.black
+        case .denied:
+            message("Snap needs access to your camera.", showsSettingsLink: true)
+        case .failed(let reason):
+            message(reason, showsSettingsLink: false)
+        }
+    }
 
-    private var shutterRow: some View {
+    // MARK: - Controls
+
+    private var controlRow: some View {
         ZStack {
-            ShutterButton(isBusy: camera.isCapturing) {
-                camera.capture(to: .cameraRoll)
+            if viewing != nil {
+                CloseButton { viewing = nil }
+            } else {
+                ShutterButton(isBusy: camera.isCapturing) { camera.capture() }
             }
 
             HStack {
                 Spacer()
                 Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { isEditingFilter = true }
+                    setEditing(true)
                 } label: {
                     Text("Filter")
                         .font(.system(size: 13, weight: .medium))
@@ -125,8 +150,7 @@ struct CameraView: View {
             }
             .padding(.trailing, 14)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
@@ -148,25 +172,57 @@ struct CameraView: View {
 
     // MARK: - Actions
 
-    private func save(_ pending: CameraModel.PendingSave, title: String, notes: String) {
-        do {
-            try store.save(profile: pending.profile,
-                           title: title,
-                           notes: notes,
-                           imageData: pending.imageData,
-                           imageType: pending.imageType)
-            camera.pendingSave = nil
-        } catch {
-            camera.pendingSave = nil
-            camera.errorMessage = error.localizedDescription
+    private func setEditing(_ editing: Bool) {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isEditingFilter = editing
+            // The strip goes away with the shutter, so a frame being viewed
+            // would have no way back.
+            if editing { viewing = nil }
         }
+    }
+
+    private func useLook(_ shot: Shot) {
+        camera.look.apply(store.profile(for: shot))
+    }
+
+    private func delete(_ shot: Shot) {
+        if viewing?.id == shot.id { viewing = nil }
+        store.delete(shot)
     }
 
     private func makeBundle() {
         do {
-            bundle = BundleFile(url: try store.makeBundle())
+            share = ShareItem(url: try store.makeBundle())
         } catch {
             camera.errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// A saved frame shown in the viewer area.
+private struct ShotView: View {
+
+    @ObservedObject var store: ShotStore
+    let shot: Shot
+    let edge: CGFloat
+
+    @State private var image: UIImage? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            }
+        }
+        .task(id: shot.id) {
+            let url = store.imageURL(for: shot)
+            let pixels = edge * 3
+            image = await Task.detached(priority: .userInitiated) {
+                ShotStore.image(at: url, maxPixelSize: pixels)
+            }.value
         }
     }
 }

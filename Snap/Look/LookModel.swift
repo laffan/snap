@@ -80,8 +80,8 @@ final class LookModel: ObservableObject {
         profile = PositiveFilmProfile()
     }
 
-    func apply(_ preset: Preset) {
-        profile = preset.profile
+    func apply(_ profile: PositiveFilmProfile) {
+        self.profile = profile
     }
 
     // MARK: - Baking

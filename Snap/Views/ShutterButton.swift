@@ -55,9 +55,38 @@ struct ShutterButton: View {
     }
 }
 
+/// Takes the shutter's place while a saved frame is being viewed. Same
+/// footprint, so the row doesn't shift when the two swap.
+struct CloseButton: View {
+
+    var action: () -> Void
+
+    private let diameter: CGFloat = 74
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.75), lineWidth: 2)
+                    .frame(width: diameter, height: diameter)
+
+                Image(systemName: "xmark")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(.white)
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close photo")
+    }
+}
+
 #Preview {
     ZStack {
         Color.black.ignoresSafeArea()
-        ShutterButton(isBusy: false) {}
+        HStack(spacing: 24) {
+            ShutterButton(isBusy: false) {}
+            CloseButton {}
+        }
     }
 }

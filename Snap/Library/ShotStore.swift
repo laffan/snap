@@ -1,11 +1,13 @@
 //
-//  PresetStore.swift
+//  ShotStore.swift
 //  Snap
 //
-//  Saved looks live as plain files in the app's Documents directory: one JSON
-//  and one image per entry, sharing a UUID. Flat and boring on purpose — it
-//  means "Bundle" is just a zip of the folder, and the archive is readable by
-//  anything.
+//  Every photo the app has taken, on disk in the app's Documents directory:
+//  one JPEG and one JSON sidecar per shot, sharing a UUID.
+//
+//  The settings live in the JPEG's EXIF as well. The sidecar is the fast path
+//  — listing the strip shouldn't mean opening every image — and EXIF is the
+//  durable one, so a file that leaves the app still describes itself.
 //
 
 import Combine
@@ -14,9 +16,10 @@ import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 
-final class PresetStore: ObservableObject {
+final class ShotStore: ObservableObject {
 
-    @Published private(set) var presets: [Preset] = []
+    /// Newest first.
+    @Published private(set) var shots: [Shot] = []
 
     private let directory: URL
     private let fileManager = FileManager.default
@@ -48,24 +51,29 @@ final class PresetStore: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        let loaded = urls
+        shots = urls
             .filter { $0.pathExtension == "json" }
-            .compactMap { url -> Preset? in
+            .compactMap { url in
                 guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? decoder.decode(Preset.self, from: data)
+                return try? decoder.decode(Shot.self, from: data)
             }
             .sorted { $0.createdAt > $1.createdAt }
-
-        presets = loaded
     }
 
-    func imageURL(for preset: Preset) -> URL {
-        directory.appendingPathComponent(preset.imageFileName)
+    func imageURL(for shot: Shot) -> URL {
+        directory.appendingPathComponent(shot.imageFileName)
     }
 
-    /// Downsampled on the way in — the cards are small and the originals are
+    /// The look this shot was taken with. Prefers the sidecar and falls back to
+    /// the JPEG's own EXIF, so a shot whose sidecar went missing is still
+    /// usable.
+    func profile(for shot: Shot) -> PositiveFilmProfile {
+        PhotoEncoder.profile(fromImageAt: imageURL(for: shot)) ?? shot.profile
+    }
+
+    /// Downsampled on the way in — thumbnails are small and the originals are
     /// full-resolution captures.
-    static func thumbnail(at url: URL, maxPixelSize: CGFloat) -> UIImage? {
+    static func image(at url: URL, maxPixelSize: CGFloat) -> UIImage? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -80,35 +88,50 @@ final class PresetStore: ObservableObject {
 
     // MARK: - Writing
 
+    /// Records a capture. Safe to call off the main thread — the file work
+    /// happens on the caller's thread and only the published list hops back.
     @discardableResult
-    func save(profile: PositiveFilmProfile,
-              title: String,
-              notes: String,
-              imageData: Data,
-              imageType: UTType) throws -> Preset {
+    func add(imageData: Data, profile: PositiveFilmProfile) throws -> Shot {
         let id = UUID()
-        let imageExtension = imageType.preferredFilenameExtension ?? "jpg"
-        let preset = Preset(id: id,
-                            title: title,
-                            notes: notes,
-                            imageFileName: "\(id.uuidString).\(imageExtension)",
-                            profile: profile)
+        let shot = Shot(id: id, imageFileName: "\(id.uuidString).jpg", profile: profile)
 
-        try imageData.write(to: directory.appendingPathComponent(preset.imageFileName))
+        try imageData.write(to: imageURL(for: shot))
+        try writeSidecar(shot)
+        publishReload()
+        return shot
+    }
 
+    func update(_ shot: Shot, title: String, notes: String) {
+        var updated = shot
+        updated.title = title
+        updated.notes = notes
+        try? writeSidecar(updated)
+        publishReload()
+    }
+
+    func delete(_ shot: Shot) {
+        try? fileManager.removeItem(at: imageURL(for: shot))
+        try? fileManager.removeItem(at: sidecarURL(for: shot))
+        publishReload()
+    }
+
+    private func sidecarURL(for shot: Shot) -> URL {
+        directory.appendingPathComponent("\(shot.id.uuidString).json")
+    }
+
+    private func writeSidecar(_ shot: Shot) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(preset).write(to: directory.appendingPathComponent("\(id.uuidString).json"))
-
-        reload()
-        return preset
+        try encoder.encode(shot).write(to: sidecarURL(for: shot))
     }
 
-    func delete(_ preset: Preset) {
-        try? fileManager.removeItem(at: imageURL(for: preset))
-        try? fileManager.removeItem(at: directory.appendingPathComponent("\(preset.id.uuidString).json"))
-        reload()
+    private func publishReload() {
+        if Thread.isMainThread {
+            reload()
+        } else {
+            DispatchQueue.main.async { [weak self] in self?.reload() }
+        }
     }
 
     // MARK: - Bundling
@@ -120,7 +143,7 @@ final class PresetStore: ObservableObject {
     /// button. The archive it produces is temporary, so it gets copied out
     /// before the accessor block returns.
     func makeBundle() throws -> URL {
-        guard !presets.isEmpty else { throw StoreError.nothingToBundle }
+        guard !shots.isEmpty else { throw StoreError.nothingToBundle }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"

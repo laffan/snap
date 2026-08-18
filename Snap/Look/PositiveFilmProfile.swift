@@ -146,3 +146,61 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// The frame width the grain size is defined against.
     static let grainReferenceWidth: CGFloat = 1080
 }
+
+// MARK: - Lenient decoding
+
+/// Hand-written so that a profile saved by an older build still loads after
+/// new knobs are added: any key that isn't in the JSON keeps its default
+/// rather than failing the whole decode. Synthesised `Codable` would throw on
+/// the first missing key and take every previously saved shot with it.
+///
+/// This lives in an extension on purpose — declaring an initialiser in the
+/// type body would suppress the memberwise initialiser the defaults rely on.
+extension PositiveFilmProfile {
+
+    enum CodingKeys: String, CodingKey {
+        case contrast, highlights, shadows, blacks, clarity, vibrance
+        case toneCurveS, blackLift
+        case bands
+        case redPrimary, greenPrimary, bluePrimary
+        case grainAmount, grainSize
+    }
+
+    init(from decoder: Decoder) throws {
+        self.init()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // `try?` on a throwing optional decode gives Float??, so both layers
+        // have to be unwrapped: a malformed value falls back just like a
+        // missing one.
+        func float(_ key: CodingKeys, _ fallback: Float) -> Float {
+            ((try? container.decodeIfPresent(Float.self, forKey: key)) ?? nil) ?? fallback
+        }
+
+        contrast   = float(.contrast, contrast)
+        highlights = float(.highlights, highlights)
+        shadows    = float(.shadows, shadows)
+        blacks     = float(.blacks, blacks)
+        clarity    = float(.clarity, clarity)
+        vibrance   = float(.vibrance, vibrance)
+        toneCurveS = float(.toneCurveS, toneCurveS)
+        blackLift  = float(.blackLift, blackLift)
+
+        grainAmount = float(.grainAmount, grainAmount)
+        grainSize   = float(.grainSize, grainSize)
+
+        if let decoded = ((try? container.decodeIfPresent([HSLBand].self, forKey: .bands)) ?? nil),
+           !decoded.isEmpty {
+            bands = decoded
+        }
+        if let decoded = ((try? container.decodeIfPresent(Primary.self, forKey: .redPrimary)) ?? nil) {
+            redPrimary = decoded
+        }
+        if let decoded = ((try? container.decodeIfPresent(Primary.self, forKey: .greenPrimary)) ?? nil) {
+            greenPrimary = decoded
+        }
+        if let decoded = ((try? container.decodeIfPresent(Primary.self, forKey: .bluePrimary)) ?? nil) {
+            bluePrimary = decoded
+        }
+    }
+}

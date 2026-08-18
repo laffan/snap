@@ -1,33 +1,37 @@
 //
-//  SavePresetSheet.swift
+//  SaveShotSheet.swift
 //  Snap
 //
-//  Names the frame that was just captured, together with the look that made it.
+//  Names a frame that has already been captured and stored.
 //
 
 import SwiftUI
 import UIKit
 
-struct SavePresetSheet: View {
+struct SaveShotSheet: View {
 
-    let image: UIImage?
+    @ObservedObject var store: ShotStore
+    let shot: Shot
     var onCancel: () -> Void
     var onSave: (_ title: String, _ notes: String) -> Void
 
     @State private var title: String
     @State private var notes: String
+    @State private var image: UIImage? = nil
     @FocusState private var notesFocused: Bool
 
-    // Explicit because the private state above would otherwise make the
+    // Explicit because the private state below would otherwise make the
     // memberwise initializer private.
-    init(image: UIImage?,
+    init(store: ShotStore,
+         shot: Shot,
          onCancel: @escaping () -> Void,
          onSave: @escaping (String, String) -> Void) {
-        self.image = image
+        self.store = store
+        self.shot = shot
         self.onCancel = onCancel
         self.onSave = onSave
-        _title = State(initialValue: Preset.defaultTitle())
-        _notes = State(initialValue: "")
+        _title = State(initialValue: shot.displayTitle)
+        _notes = State(initialValue: shot.notes)
     }
 
     var body: some View {
@@ -55,16 +59,22 @@ struct SavePresetSheet: View {
                         .focused($notesFocused)
                 }
             }
+            .task {
+                let url = store.imageURL(for: shot)
+                image = await Task.detached(priority: .userInitiated) {
+                    ShotStore.image(at: url, maxPixelSize: 900)
+                }.value
+            }
             .navigationTitle("Save Look")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", action: onCancel)
+                    Button("Done", action: onCancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSave(trimmed.isEmpty ? Preset.defaultTitle() : trimmed, notes)
+                        onSave(trimmed, notes)
                     }
                 }
             }
