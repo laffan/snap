@@ -337,8 +337,13 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                 // The negative is kept in the app's store, where the strip can
                 // share it and the bundle can carry it. Only the graded frame
                 // goes to the camera roll.
+                //
+                // Squaring it only narrows the file's default-crop rectangle —
+                // no pixels move — and falls back to the full frame if ImageIO
+                // can't rewrite the container on this device.
+                let negative = isRAW ? (RAWCropper.squareCropped(data) ?? data) : nil
                 let shot = try self.store.add(imageData: jpeg,
-                                              rawData: isRAW ? data : nil,
+                                              rawData: negative,
                                               profile: profile)
                 try await self.library.save(jpeg)
 

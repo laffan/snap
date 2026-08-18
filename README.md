@@ -63,8 +63,22 @@ look would have to survive being re-mosaiced, which throws away most of what it
 did. So the grade moves to the other end of the pipeline instead: the sensor
 data is developed here, graded here, and written out as JPEG.
 
-The untouched DNG is kept in the app's store next to the JPEG, where the roll
-can share it and Bundle carries it. Only the graded JPEG goes to the camera
+The DNG is kept in the app's store next to the JPEG, where the roll can share
+it and Bundle carries it.
+
+It is cropped to the same square as the JPEG, without any pixel being touched.
+A DNG carries `DefaultCropOrigin` and `DefaultCropSize` — the rectangle a raw
+converter shows by default, which iPhone files already use to trim the sensor's
+edge — so squaring the file just narrows that rectangle. The mosaic stays
+whole, the crop stays reversible in any converter, and `CIRAWFilter` honours
+the same tags, so re-developing a stored negative comes out square too. The
+crop offset is kept even, which leaves the same colour of the filter array at
+the corner.
+
+Rewriting a DNG needs ImageIO to be able to author the container, which it
+only does for the types it advertises. That is checked at runtime rather than
+assumed: if this build of iOS can't write DNG, the negative is kept full frame
+and the RAW section of the filter panel says so. Only the graded JPEG goes to the camera
 roll. Attaching the negative to the camera-roll asset as an alternate resource
 would be the tidier arrangement, but `PHAssetCreationRequest` will not accept a
 RAW alternate as raw bytes — it returns `PHPhotosError.invalidResource` — and

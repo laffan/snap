@@ -159,6 +159,13 @@ struct FilterPanel: View {
                     .foregroundStyle(.white.opacity(0.4))
                     .fixedSize(horizontal: false, vertical: true)
 
+                Text(RAWCropper.isSupported
+                     ? "DNG files are cropped square to match the JPEG."
+                     : "DNG files are kept full frame — this version of iOS can't rewrite the RAW container, so the square crop can't be applied to it.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(RAWCropper.isSupported ? 0.4 : 0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+
                 SliderRow(label: "Apple Tone Curve", value: $look.profile.rawBoost,
                           range: 0...100, onEditingChanged: editing)
                     .disabled(!isRAWEnabled)
