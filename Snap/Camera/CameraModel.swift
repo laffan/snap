@@ -303,12 +303,6 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         let isRAW = photo.isRawPhoto
         let wantsTitle = self.wantsTitle
 
-        // Every photo gets its own patch of the noise field. Sharing one would
-        // put an identical fixed pattern on every frame, which reads as sensor
-        // dirt rather than noise.
-        let noiseOffset = CGPoint(x: CGFloat.random(in: 0...8192),
-                                  y: CGFloat.random(in: 0...8192))
-
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -333,18 +327,20 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                 // full size, and always through a full-resolution LUT even if
                 // the preview was running on a draft one mid-drag.
                 let graded = self.look.finalFilter(for: profile)
-                    .apply(to: upright.centerSquareCropped(), noiseOffset: noiseOffset)
+                    .apply(to: upright.centerSquareCropped())
 
                 let jpeg = try PhotoEncoder.jpeg(from: graded,
                                                  profile: profile,
                                                  sourceMetadata: sourceMetadata,
                                                  context: self.stillContext)
 
-                let shot = try self.store.add(imageData: jpeg, profile: profile)
-                // The negative goes to the camera roll alongside the graded
-                // frame rather than into the app's store, so it stays editable
-                // in Photos without doubling what Bundle has to carry.
-                try await self.library.save(jpeg, rawData: isRAW ? data : nil)
+                // The negative is kept in the app's store, where the strip can
+                // share it and the bundle can carry it. Only the graded frame
+                // goes to the camera roll.
+                let shot = try self.store.add(imageData: jpeg,
+                                              rawData: isRAW ? data : nil,
+                                              profile: profile)
+                try await self.library.save(jpeg)
 
                 if wantsTitle {
                     await MainActor.run { self.pendingTitle = shot }

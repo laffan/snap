@@ -9,6 +9,10 @@
 //  — listing the strip shouldn't mean opening every image — and EXIF is the
 //  durable one, so a file that leaves the app still describes itself.
 //
+//  A RAW capture keeps its DNG here too, which is what lets the strip share
+//  the negative and puts it in the bundle. It also makes the store grow
+//  quickly: a DNG runs to tens of megabytes.
+//
 
 import Combine
 import Foundation
@@ -64,6 +68,13 @@ final class ShotStore: ObservableObject {
         directory.appendingPathComponent(shot.imageFileName)
     }
 
+    /// The negative, when the capture was RAW.
+    func rawURL(for shot: Shot) -> URL? {
+        guard let rawFileName = shot.rawFileName else { return nil }
+        let url = directory.appendingPathComponent(rawFileName)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
     /// The look this shot was taken with. Prefers the sidecar and falls back to
     /// the JPEG's own EXIF, so a shot whose sidecar went missing is still
     /// usable.
@@ -91,11 +102,21 @@ final class ShotStore: ObservableObject {
     /// Records a capture. Safe to call off the main thread — the file work
     /// happens on the caller's thread and only the published list hops back.
     @discardableResult
-    func add(imageData: Data, profile: PositiveFilmProfile) throws -> Shot {
+    func add(imageData: Data,
+             rawData: Data?,
+             profile: PositiveFilmProfile) throws -> Shot {
         let id = UUID()
-        let shot = Shot(id: id, imageFileName: "\(id.uuidString).jpg", profile: profile)
+        let shot = Shot(id: id,
+                        imageFileName: "\(id.uuidString).jpg",
+                        rawFileName: rawData == nil ? nil : "\(id.uuidString).dng",
+                        profile: profile)
 
         try imageData.write(to: imageURL(for: shot))
+        // Not `rawURL(for:)` — that checks for existence, and the file is
+        // about to be created.
+        if let rawData, let rawFileName = shot.rawFileName {
+            try rawData.write(to: directory.appendingPathComponent(rawFileName))
+        }
         try writeSidecar(shot)
         publishReload()
         return shot
@@ -111,6 +132,9 @@ final class ShotStore: ObservableObject {
 
     func delete(_ shot: Shot) {
         try? fileManager.removeItem(at: imageURL(for: shot))
+        if let rawURL = rawURL(for: shot) {
+            try? fileManager.removeItem(at: rawURL)
+        }
         try? fileManager.removeItem(at: sidecarURL(for: shot))
         publishReload()
     }

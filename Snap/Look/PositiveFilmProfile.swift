@@ -88,15 +88,6 @@ struct PositiveFilmProfile: Codable, Equatable {
     var greenPrimary = Primary(hue: -10, saturation:   0)
     var bluePrimary  = Primary(hue: +10, saturation: -10)
 
-    // MARK: - Noise
-
-    /// Noise strength, 0...100.
-    ///
-    /// Deliberately has no size control: the noise is generated one sample per
-    /// pixel, which is what keeps it a fine texture rather than the clumps a
-    /// scaled-up noise field produces.
-    var noiseAmount: Float = 15
-
     // MARK: - RAW
 
     /// How much of Apple's global tone curve to keep when developing a RAW
@@ -149,9 +140,6 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// full-resolution capture look like the same photograph.
     var clarityRadiusFraction: Float { 0.018 }
 
-    /// Peak-to-peak noise deviation fed to the overlay blend.
-    var noiseIntensity: Float { noiseAmount / 100 * 0.20 }
-
     /// `CIRAWFilter.boostAmount`, 0...1.
     var rawBoostAmount: Float { rawBoost / 100 }
 }
@@ -172,7 +160,6 @@ extension PositiveFilmProfile {
         case toneCurveS, blackLift
         case bands
         case redPrimary, greenPrimary, bluePrimary
-        case noiseAmount
         case rawBoost
     }
 
@@ -196,7 +183,6 @@ extension PositiveFilmProfile {
         toneCurveS = float(.toneCurveS, toneCurveS)
         blackLift  = float(.blackLift, blackLift)
 
-        noiseAmount = float(.noiseAmount, noiseAmount)
         rawBoost    = float(.rawBoost, rawBoost)
 
         if let decoded = ((try? container.decodeIfPresent([HSLBand].self, forKey: .bands)) ?? nil),

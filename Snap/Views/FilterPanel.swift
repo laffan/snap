@@ -37,7 +37,6 @@ struct FilterPanel: View {
                     toneCurve
                     colorMixer
                     calibration
-                    noise
                     raw
                 }
                 .padding(.horizontal, 20)
@@ -144,13 +143,6 @@ struct FilterPanel: View {
         .padding(.bottom, 6)
     }
 
-    private var noise: some View {
-        FilterSection(title: "Noise") {
-            SliderRow(label: "Amount", value: $look.profile.noiseAmount,
-                      range: 0...100, onEditingChanged: editing)
-        }
-    }
-
     @ViewBuilder
     private var raw: some View {
         FilterSection(title: "RAW") {
@@ -162,7 +154,7 @@ struct FilterPanel: View {
                 }
                 .tint(.white.opacity(0.85))
 
-                Text("Develops the sensor data here, with Apple's noise reduction, sharpening and local tone mapping off. The DNG is kept alongside the photo.")
+                Text("Develops the sensor data here, with Apple's noise reduction, sharpening and local tone mapping off. The DNG is kept in the app, shareable from the roll.")
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.4))
                     .fixedSize(horizontal: false, vertical: true)

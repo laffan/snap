@@ -15,7 +15,7 @@ struct FilmStrip: View {
     var selection: Shot?
     var onSelect: (Shot) -> Void
     var onUseLook: (Shot) -> Void
-    var onShare: (Shot) -> Void
+    var onShare: (URL) -> Void
     var onDelete: (Shot) -> Void
 
     /// Thumbnails are decoded and held in memory, so the strip only reaches
@@ -33,7 +33,7 @@ struct FilmStrip: View {
          selection: Shot?,
          onSelect: @escaping (Shot) -> Void,
          onUseLook: @escaping (Shot) -> Void,
-         onShare: @escaping (Shot) -> Void,
+         onShare: @escaping (URL) -> Void,
          onDelete: @escaping (Shot) -> Void) {
         self.store = store
         self.selection = selection
@@ -64,9 +64,19 @@ struct FilmStrip: View {
                             }
 
                             Button {
-                                onShare(shot)
+                                onShare(store.imageURL(for: shot))
                             } label: {
-                                Label("Share Image", systemImage: "square.and.arrow.up")
+                                Label("Share JPEG", systemImage: "square.and.arrow.up")
+                            }
+
+                            // Only offered when the capture was RAW and the
+                            // negative is still on disk.
+                            if let rawURL = store.rawURL(for: shot) {
+                                Button {
+                                    onShare(rawURL)
+                                } label: {
+                                    Label("Share RAW", systemImage: "square.and.arrow.up.on.square")
+                                }
                             }
 
                             Button(role: .destructive) {

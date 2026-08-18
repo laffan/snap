@@ -8,6 +8,12 @@ import Photos
 import UniformTypeIdentifiers
 
 /// Writes finished photos to the camera roll.
+///
+/// Only the graded JPEG goes here. The negative from a RAW capture stays in
+/// the app's own store, where the strip can share it and the bundle can carry
+/// it, rather than being attached to the asset as an alternate resource —
+/// `PHAssetCreationRequest` will not accept a RAW alternate as raw bytes, and
+/// duplicating tens of megabytes per shot to work around that isn't worth it.
 struct PhotoLibrarySaver {
 
     enum SaveError: LocalizedError {
@@ -21,24 +27,14 @@ struct PhotoLibrarySaver {
         }
     }
 
-    /// Saves the graded JPEG, attaching the untouched DNG as the alternate
-    /// resource when the capture was RAW. Photos then shows one asset that
-    /// still carries the negative, the way any RAW camera app behaves.
-    func save(_ jpeg: Data, rawData: Data? = nil) async throws {
+    func save(_ jpeg: Data) async throws {
         try await requestAuthorization()
 
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetCreationRequest.forAsset()
-
-            let jpegOptions = PHAssetResourceCreationOptions()
-            jpegOptions.uniformTypeIdentifier = UTType.jpeg.identifier
-            request.addResource(with: .photo, data: jpeg, options: jpegOptions)
-
-            if let rawData {
-                let rawOptions = PHAssetResourceCreationOptions()
-                rawOptions.uniformTypeIdentifier = "com.adobe.raw-image"
-                request.addResource(with: .alternatePhoto, data: rawData, options: rawOptions)
-            }
+            let options = PHAssetResourceCreationOptions()
+            options.uniformTypeIdentifier = UTType.jpeg.identifier
+            request.addResource(with: .photo, data: jpeg, options: options)
         }
     }
 

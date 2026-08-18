@@ -45,7 +45,7 @@ struct CameraView: View {
                               selection: viewing,
                               onSelect: { viewing = $0 },
                               onUseLook: useLook,
-                              onShare: { share = ShareItem(url: store.imageURL(for: $0)) },
+                              onShare: { share = ShareItem(url: $0) },
                               onDelete: delete)
                         .padding(.bottom, 10)
                 }

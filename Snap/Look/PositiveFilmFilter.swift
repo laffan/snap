@@ -12,7 +12,7 @@
 //  saved file go through the exact same maths.
 //
 //  The adjustments that are *not* per-pixel — highlight/shadow recovery,
-//  clarity and noise — stay as real filters around the LUT.
+//  clarity — stay as real filters around the LUT.
 //
 
 import CoreImage
@@ -60,11 +60,7 @@ final class PositiveFilmFilter {
 
     /// Applies the full look. The result has the same extent as the input, so
     /// callers can treat this as an in-place transformation.
-    ///
-    /// `noiseOffset` shifts the noise field. The preview leaves it at zero so
-    /// the texture doesn't crawl between frames; captures pass a random offset
-    /// so every photo doesn't share one fixed pattern.
-    func apply(to image: CIImage, noiseOffset: CGPoint = .zero) -> CIImage {
+    func apply(to image: CIImage) -> CIImage {
         let extent = image.extent
         guard !extent.isEmpty, !extent.isInfinite else { return image }
 
@@ -100,49 +96,7 @@ final class PositiveFilmFilter {
         cube.colorSpace = workingColorSpace
         output = cube.outputImage ?? output
 
-        // 4. Noise last — anything after it would just be regrading the noise.
-        output = applyNoise(to: output, extent: extent, offset: noiseOffset)
-
         return output.cropped(to: extent)
-    }
-
-    /// Very fine monochrome noise, one sample per pixel, blended in `overlay`.
-    ///
-    /// There is deliberately no size control. Scaling a noise field up is what
-    /// turns noise into grain — the samples smear into visible clumps — so the
-    /// field is left at 1:1 and the only knob is how much of it there is.
-    ///
-    /// Overlay is the useful part: a foreground of exactly 0.5 is a no-op, and
-    /// its response scales with `2 × backdrop` in the shadows and
-    /// `2 × (1 − backdrop)` in the highlights. So the noise naturally peaks in
-    /// the midtones and fades out at both ends, without needing a mask.
-    private func applyNoise(to image: CIImage, extent: CGRect, offset: CGPoint) -> CIImage {
-        let intensity = profile.noiseIntensity
-        guard intensity > 0, let source = CIFilter.randomGenerator().outputImage else {
-            return image
-        }
-
-        let bias = 0.5 - intensity / 2
-
-        var noise = source.transformed(
-            by: CGAffineTransform(translationX: offset.x.rounded(), y: offset.y.rounded())
-        )
-
-        // Collapse to monochrome off one channel and squeeze the range down to
-        // `intensity`, centred on the neutral 0.5.
-        noise = noise.applyingFilter("CIColorMatrix", parameters: [
-            "inputRVector": CIVector(x: CGFloat(intensity), y: 0, z: 0, w: 0),
-            "inputGVector": CIVector(x: CGFloat(intensity), y: 0, z: 0, w: 0),
-            "inputBVector": CIVector(x: CGFloat(intensity), y: 0, z: 0, w: 0),
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
-            "inputBiasVector": CIVector(x: CGFloat(bias), y: CGFloat(bias), z: CGFloat(bias), w: 1),
-        ])
-
-        return noise
-            .cropped(to: extent)
-            .applyingFilter("CIOverlayBlendMode", parameters: [
-                kCIInputBackgroundImageKey: image
-            ])
     }
 
     // MARK: - Baking the lookup table
