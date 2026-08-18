@@ -66,19 +66,37 @@ data is developed here, graded here, and written out as JPEG.
 The DNG is kept in the app's store next to the JPEG, where the roll can share
 it and Bundle carries it.
 
-It is cropped to the same square as the JPEG, without any pixel being touched.
-A DNG carries `DefaultCropOrigin` and `DefaultCropSize` — the rectangle a raw
-converter shows by default, which iPhone files already use to trim the sensor's
-edge — so squaring the file just narrows that rectangle. The mosaic stays
-whole, the crop stays reversible in any converter, and `CIRAWFilter` honours
-the same tags, so re-developing a stored negative comes out square too. The
-crop offset is kept even, which leaves the same colour of the filter array at
-the corner.
+### The negative opens cropped and graded
 
-Rewriting a DNG needs ImageIO to be able to author the container, which it
-only does for the types it advertises. That is checked at runtime rather than
-assumed: if this build of iOS can't write DNG, the negative is kept full frame
-and the RAW section of the filter panel says so. Only the graded JPEG goes to the camera
+A `.xmp` sidecar is written beside every DNG carrying Camera Raw settings, so
+the negative opens in Lightroom already square and already wearing the look.
+
+This is the payoff for keeping the profile in Lightroom slider units from the
+start: `crs:` properties take those numbers directly. Contrast 28 becomes
+`crs:Contrast2012="28"`, the Green band's teal shift becomes
+`crs:HueAdjustmentGreen="35"`, the blue primary becomes `crs:BlueHue` and
+`crs:BlueSaturation`. Only two stages need converting — the tone curve is
+sampled into `crs:ToneCurvePV2012` control points, and the square becomes the
+`crs:Crop*` fractions.
+
+**Share RAW sends the DNG and its sidecar together.** Apart they mean nothing;
+Adobe finds the sidecar by matching base names in the same folder.
+
+Snap still tries to write the square into the DNG itself first, by narrowing
+its `DefaultCropOrigin`/`DefaultCropSize` — that holds in every converter, not
+just Adobe's, and no pixel moves. Whether iOS will author a DNG container is
+not something to assume, so the write is attempted and the *outcome* reported
+in the RAW section of the filter panel. When it fails, the crop rides in the
+sidecar instead and the two never both apply, which would otherwise crop twice.
+
+What the sidecar cannot do is reach a reader that doesn't look for one. Apple
+Photos and Preview show the full frame, and Lightroom mobile expects settings
+embedded in the DNG rather than beside it. Lightroom Classic, Camera Raw,
+Bridge and Capture One all read it; in Classic, *Metadata ▸ Read Metadata from
+File* forces the issue if an import misses it.
+
+The rendering will be close but not identical to the JPEG — same slider values,
+but Adobe's demosaic, camera profile and slider implementations are their own. Only the graded JPEG goes to the camera
 roll. Attaching the negative to the camera-roll asset as an alternate resource
 would be the tidier arrangement, but `PHAssetCreationRequest` will not accept a
 RAW alternate as raw bytes — it returns `PHPhotosError.invalidResource` — and

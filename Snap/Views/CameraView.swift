@@ -32,6 +32,7 @@ struct CameraView: View {
                                 isBusy: camera.isCapturing,
                                 isRAWEnabled: $camera.isRAWEnabled,
                                 isRAWAvailable: camera.isRAWAvailable,
+                                didCropNegative: camera.didCropNegative,
                                 onSnap: { camera.capture() },
                                 onSave: { camera.capture(titled: true) },
                                 onLoad: { isLoadingLook = true },
@@ -45,7 +46,7 @@ struct CameraView: View {
                               selection: viewing,
                               onSelect: { viewing = $0 },
                               onUseLook: useLook,
-                              onShare: { share = ShareItem(url: $0) },
+                              onShare: { share = ShareItem($0) },
                               onDelete: delete)
                         .padding(.bottom, 10)
                 }
@@ -81,7 +82,7 @@ struct CameraView: View {
                           },
                           onCancel: { isLoadingLook = false })
         }
-        .sheet(item: $share) { ShareSheet(url: $0.url) }
+        .sheet(item: $share) { ShareSheet(urls: $0.urls) }
         .alert("Something went wrong",
                isPresented: Binding(get: { camera.errorMessage != nil },
                                     set: { if !$0 { camera.errorMessage = nil } }),
@@ -194,7 +195,7 @@ struct CameraView: View {
 
     private func makeBundle() {
         do {
-            share = ShareItem(url: try store.makeBundle())
+            share = ShareItem([try store.makeBundle()])
         } catch {
             camera.errorMessage = error.localizedDescription
         }

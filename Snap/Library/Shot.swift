@@ -19,6 +19,8 @@ struct Shot: Codable, Identifiable, Equatable {
     /// File name of the negative, when the capture was RAW. Optional so shots
     /// saved before RAW existed still decode.
     var rawFileName: String?
+    /// File name of the Camera Raw sidecar that travels with the negative.
+    var xmpFileName: String?
     var profile: PositiveFilmProfile
 
     init(id: UUID = UUID(),
@@ -27,6 +29,7 @@ struct Shot: Codable, Identifiable, Equatable {
          createdAt: Date = Date(),
          imageFileName: String,
          rawFileName: String? = nil,
+         xmpFileName: String? = nil,
          profile: PositiveFilmProfile) {
         self.id = id
         self.title = title
@@ -34,6 +37,7 @@ struct Shot: Codable, Identifiable, Equatable {
         self.createdAt = createdAt
         self.imageFileName = imageFileName
         self.rawFileName = rawFileName
+        self.xmpFileName = xmpFileName
         self.profile = profile
     }
 

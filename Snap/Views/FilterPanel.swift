@@ -16,6 +16,7 @@ struct FilterPanel: View {
     var isBusy: Bool
     @Binding var isRAWEnabled: Bool
     var isRAWAvailable: Bool
+    var didCropNegative: Bool?
     var onSnap: () -> Void
     var onSave: () -> Void
     var onLoad: () -> Void
@@ -159,11 +160,9 @@ struct FilterPanel: View {
                     .foregroundStyle(.white.opacity(0.4))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(RAWCropper.isSupported
-                     ? "DNG files are cropped square to match the JPEG."
-                     : "DNG files are kept full frame — this version of iOS can't rewrite the RAW container, so the square crop can't be applied to it.")
+                Text(cropStatus)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(RAWCropper.isSupported ? 0.4 : 0.55))
+                    .foregroundStyle(.white.opacity(0.4))
                     .fixedSize(horizontal: false, vertical: true)
 
                 SliderRow(label: "Apple Tone Curve", value: $look.profile.rawBoost,
@@ -180,6 +179,20 @@ struct FilterPanel: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.white.opacity(0.4))
             }
+        }
+    }
+
+    /// Reports what actually happened to the last negative rather than what
+    /// the API advertises — guessing from the writable-type list is what hid
+    /// the failure before.
+    private var cropStatus: String {
+        switch didCropNegative {
+        case .some(true):
+            return "The square crop is written into the DNG, so it holds in any converter. Settings travel in a .xmp sidecar."
+        case .some(false):
+            return "iOS wouldn't rewrite the DNG, so the crop and the settings both travel in a .xmp sidecar. Keep the two files together — Lightroom, Camera Raw and Bridge read it; Photos and Preview will show the full frame."
+        case .none:
+            return "Crop and settings are written for Camera Raw as a .xmp sidecar beside the DNG. Share RAW sends both."
         }
     }
 

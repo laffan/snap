@@ -55,6 +55,11 @@ final class CameraModel: NSObject, ObservableObject {
     /// Bayer RAW.
     @Published private(set) var isRAWAvailable = false
 
+    /// Whether the last RAW capture's square crop could be written into the
+    /// DNG itself. Nil until one has been taken. When false the crop rides in
+    /// the sidecar instead, which only Camera Raw and friends will read.
+    @Published private(set) var didCropNegative: Bool? = nil
+
     /// Whether to capture RAW. Persisted, and ignored when unavailable.
     @Published var isRAWEnabled: Bool = UserDefaults.standard.object(forKey: CameraModel.rawDefaultsKey) as? Bool ?? true {
         didSet { UserDefaults.standard.set(isRAWEnabled, forKey: CameraModel.rawDefaultsKey) }
@@ -337,13 +342,26 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                 // The negative is kept in the app's store, where the strip can
                 // share it and the bundle can carry it. Only the graded frame
                 // goes to the camera roll.
-                //
-                // Squaring it only narrows the file's default-crop rectangle —
-                // no pixels move — and falls back to the full frame if ImageIO
-                // can't rewrite the container on this device.
-                let negative = isRAW ? (RAWCropper.squareCropped(data) ?? data) : nil
+                var negative: Data?
+                var xmp: String?
+
+                if isRAW {
+                    // Try to square the file itself first — that narrows its
+                    // default-crop rectangle without moving a pixel, and holds
+                    // in every converter. If iOS won't author the container,
+                    // the same rectangle travels in the sidecar instead.
+                    let squared = RAWCropper.squareCropped(data)
+                    negative = squared ?? data
+                    let cropInXMP = squared == nil ? RAWCropper.squareCropFractions(data) : nil
+                    xmp = CameraRawSidecar.xmp(for: profile, crop: cropInXMP)
+
+                    let cropped = squared != nil
+                    await MainActor.run { self.didCropNegative = cropped }
+                }
+
                 let shot = try self.store.add(imageData: jpeg,
                                               rawData: negative,
+                                              xmp: xmp,
                                               profile: profile)
                 try await self.library.save(jpeg)
 

@@ -2,18 +2,20 @@
 //  RAWCropper.swift
 //  Snap
 //
-//  Crops a DNG to the same square the JPEG gets.
+//  Works out the square that matches the JPEG, and — where iOS allows it —
+//  writes that square into the DNG itself.
 //
 //  Nothing here touches sensor pixels. A DNG carries DefaultCropOrigin and
-//  DefaultCropSize — the rectangle a raw converter should show by default,
-//  which iPhone files already use to trim the sensor's edge — so squaring the
-//  file is a matter of narrowing that rectangle. The mosaic stays whole, the
-//  crop stays reversible in any converter, and `CIRAWFilter` honours the same
-//  tags, so re-developing a stored negative comes out square too.
+//  DefaultCropSize, the rectangle a raw converter shows by default, so
+//  squaring the file is a matter of narrowing that rectangle.
 //
-//  The catch is that rewriting a DNG means ImageIO has to be able to *write*
-//  the container, and it can only write the types it advertises. That is
-//  checked at runtime rather than assumed — see `isSupported`.
+//  Rewriting a DNG needs ImageIO to be able to author the container, which it
+//  may not do. Rather than gate on the advertised writable types, the write is
+//  simply attempted and the outcome reported — the gate is what silently kept
+//  the full frame before, and a failed attempt costs nothing.
+//
+//  When it doesn't work, `squareCropFractions` gives the same rectangle in the
+//  form Camera Raw wants, and the crop travels in the XMP instead.
 //
 
 import Foundation
@@ -21,25 +23,23 @@ import ImageIO
 
 enum RAWCropper {
 
-    /// The DNG type identifier, as reported by an image source for these files.
-    private static let dngType = "com.adobe.raw-image"
-
-    /// Whether ImageIO on this device can author the RAW container at all.
-    ///
-    /// If it can't there is no way to hand back a modified DNG through system
-    /// APIs, and callers keep the original full-frame file.
-    static var isSupported: Bool {
-        let writable = (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
-        return writable.contains(dngType)
+    /// The largest centred square, as fractions of the oriented frame — the
+    /// shape `crs:CropTop`/`Left`/`Bottom`/`Right` take.
+    struct CropFractions {
+        var top: Double
+        var left: Double
+        var bottom: Double
+        var right: Double
     }
 
+    // MARK: - Rewriting the file
+
     /// Returns a DNG whose default crop is the largest centred square, or nil
-    /// if the file can't be rewritten — in which case the original still
-    /// stands, uncropped.
+    /// if the container can't be rewritten on this device — in which case the
+    /// original still stands and the crop goes in the XMP.
     static func squareCropped(_ dngData: Data) -> Data? {
         guard let source = CGImageSourceCreateWithData(dngData as CFData, nil),
-              let type = CGImageSourceGetType(source) as String?,
-              (CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []).contains(type),
+              let type = CGImageSourceGetType(source),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
               let square = squareCrop(in: properties) else {
             return nil
@@ -53,16 +53,40 @@ enum RAWCropper {
         updated[kCGImagePropertyDNGDictionary as String] = dng
 
         let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(output, type as CFString, 1, nil) else {
+        guard let destination = CGImageDestinationCreateWithData(output, type, 1, nil) else {
             return nil
         }
         CGImageDestinationAddImageFromSource(destination, source, 0, updated as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { return nil }
+        guard CGImageDestinationFinalize(destination), output.length > 0 else { return nil }
 
         return output as Data
     }
 
     // MARK: - Geometry
+
+    /// The same square, expressed the way Camera Raw stores a crop: fractions
+    /// of the frame *as displayed*, so orientation has to be applied first.
+    static func squareCropFractions(_ dngData: Data) -> CropFractions? {
+        guard let source = CGImageSourceCreateWithData(dngData as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let size = frameSize(in: properties) else {
+            return nil
+        }
+
+        // Orientations 5–8 are the quarter turns, which swap the axes.
+        let orientation = (properties[kCGImagePropertyOrientation as String] as? Int) ?? 1
+        let isQuarterTurn = (5...8).contains(orientation)
+        let width = isQuarterTurn ? size.height : size.width
+        let height = isQuarterTurn ? size.width : size.height
+
+        guard width > 0, height > 0 else { return nil }
+        let edge = min(width, height)
+
+        let insetX = (width - edge) / 2 / width
+        let insetY = (height - edge) / 2 / height
+
+        return CropFractions(top: insetY, left: insetX, bottom: 1 - insetY, right: 1 - insetX)
+    }
 
     private struct Square {
         var x: Int
@@ -70,51 +94,46 @@ enum RAWCropper {
         var edge: Int
     }
 
-    /// The centred square inside whatever rectangle the file currently calls
-    /// its default crop.
+    /// The rectangle the file currently calls its default crop.
+    private static func frameSize(in properties: [String: Any]) -> (width: Double, height: Double)? {
+        let dng = properties[kCGImagePropertyDNGDictionary as String] as? [String: Any]
+        let size = numbers(dng?[kCGImagePropertyDNGDefaultCropSize as String])
+
+        if size.count == 2, size[0] > 0, size[1] > 0 {
+            return (size[0], size[1])
+        }
+        if let pixelWidth = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue,
+           let pixelHeight = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.doubleValue,
+           pixelWidth > 0, pixelHeight > 0 {
+            return (pixelWidth, pixelHeight)
+        }
+        return nil
+    }
+
+    /// The centred square inside the default-crop rectangle, in raw pixels.
     ///
     /// This is the same rectangle `centerSquareCropped()` takes for the JPEG:
     /// `CIRAWFilter` develops the default-crop area, and a centred square of
-    /// that area is what both paths end up with. Orientation doesn't enter into
-    /// it — a centred square is the same rectangle whichever way the frame is
-    /// rotated for display.
+    /// that area is what both paths end up with.
     private static func squareCrop(in properties: [String: Any]) -> Square? {
+        guard let size = frameSize(in: properties) else { return nil }
+
         let dng = properties[kCGImagePropertyDNGDictionary as String] as? [String: Any]
-
         let origin = numbers(dng?[kCGImagePropertyDNGDefaultCropOrigin as String])
-        let size = numbers(dng?[kCGImagePropertyDNGDefaultCropSize as String])
-
         let originX = origin.count == 2 ? origin[0] : 0
         let originY = origin.count == 2 ? origin[1] : 0
 
-        let width: Double
-        let height: Double
-        if size.count == 2, size[0] > 0, size[1] > 0 {
-            width = size[0]
-            height = size[1]
-        } else if let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? Double,
-                  let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? Double {
-            width = pixelWidth
-            height = pixelHeight
-        } else {
-            return nil
-        }
-
-        let edge = min(width, height)
+        let edge = min(size.width, size.height)
         guard edge > 0 else { return nil }
 
         // Round the *offset* to even, not the absolute coordinate: evening the
         // coordinate can land before the rectangle's own origin when that
         // origin is odd, putting the crop outside the valid area. An even
-        // offset also keeps the same colour of the filter array at the corner,
+        // offset also leaves the same colour of the filter array at the corner,
         // which is the phase that actually matters.
-        //
-        // An even offset plus an even edge is always inside: the offset is at
-        // most (width − edge) / 2, and rounding only shrinks both.
-        let squareEdge = even(edge)
-        return Square(x: Int(originX.rounded(.down)) + even((width - edge) / 2),
-                      y: Int(originY.rounded(.down)) + even((height - edge) / 2),
-                      edge: squareEdge)
+        return Square(x: Int(originX.rounded(.down)) + even((size.width - edge) / 2),
+                      y: Int(originY.rounded(.down)) + even((size.height - edge) / 2),
+                      edge: even(edge))
     }
 
     /// Largest even integer no greater than `value`.

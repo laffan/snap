@@ -75,6 +75,19 @@ final class ShotStore: ObservableObject {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
+    /// The Camera Raw sidecar for the negative.
+    func xmpURL(for shot: Shot) -> URL? {
+        guard let xmpFileName = shot.xmpFileName else { return nil }
+        let url = directory.appendingPathComponent(xmpFileName)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Everything that has to travel together for a raw converter to read the
+    /// look: the negative first, then its sidecar.
+    func negativeURLs(for shot: Shot) -> [URL] {
+        [rawURL(for: shot), xmpURL(for: shot)].compactMap { $0 }
+    }
+
     /// The look this shot was taken with. Prefers the sidecar and falls back to
     /// the JPEG's own EXIF, so a shot whose sidecar went missing is still
     /// usable.
@@ -104,18 +117,26 @@ final class ShotStore: ObservableObject {
     @discardableResult
     func add(imageData: Data,
              rawData: Data?,
+             xmp: String?,
              profile: PositiveFilmProfile) throws -> Shot {
         let id = UUID()
+        // Adobe looks for the sidecar under the negative's own base name.
         let shot = Shot(id: id,
                         imageFileName: "\(id.uuidString).jpg",
                         rawFileName: rawData == nil ? nil : "\(id.uuidString).dng",
+                        xmpFileName: (rawData == nil || xmp == nil) ? nil : "\(id.uuidString).xmp",
                         profile: profile)
 
         try imageData.write(to: imageURL(for: shot))
-        // Not `rawURL(for:)` — that checks for existence, and the file is
-        // about to be created.
+        // Not `rawURL(for:)`/`xmpURL(for:)` — those check for existence, and
+        // the files are about to be created.
         if let rawData, let rawFileName = shot.rawFileName {
             try rawData.write(to: directory.appendingPathComponent(rawFileName))
+        }
+        if let xmp, let xmpFileName = shot.xmpFileName {
+            try xmp.write(to: directory.appendingPathComponent(xmpFileName),
+                          atomically: true,
+                          encoding: .utf8)
         }
         try writeSidecar(shot)
         publishReload()
@@ -134,6 +155,9 @@ final class ShotStore: ObservableObject {
         try? fileManager.removeItem(at: imageURL(for: shot))
         if let rawURL = rawURL(for: shot) {
             try? fileManager.removeItem(at: rawURL)
+        }
+        if let xmpURL = xmpURL(for: shot) {
+            try? fileManager.removeItem(at: xmpURL)
         }
         try? fileManager.removeItem(at: sidecarURL(for: shot))
         publishReload()
