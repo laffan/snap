@@ -21,14 +21,24 @@ struct PhotoLibrarySaver {
         }
     }
 
-    func save(_ data: Data, type: UTType) async throws {
+    /// Saves the graded JPEG, attaching the untouched DNG as the alternate
+    /// resource when the capture was RAW. Photos then shows one asset that
+    /// still carries the negative, the way any RAW camera app behaves.
+    func save(_ jpeg: Data, rawData: Data? = nil) async throws {
         try await requestAuthorization()
 
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetCreationRequest.forAsset()
-            let options = PHAssetResourceCreationOptions()
-            options.uniformTypeIdentifier = type.identifier
-            request.addResource(with: .photo, data: data, options: options)
+
+            let jpegOptions = PHAssetResourceCreationOptions()
+            jpegOptions.uniformTypeIdentifier = UTType.jpeg.identifier
+            request.addResource(with: .photo, data: jpeg, options: jpegOptions)
+
+            if let rawData {
+                let rawOptions = PHAssetResourceCreationOptions()
+                rawOptions.uniformTypeIdentifier = "com.adobe.raw-image"
+                request.addResource(with: .alternatePhoto, data: rawData, options: rawOptions)
+            }
         }
     }
 

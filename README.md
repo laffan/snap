@@ -40,10 +40,43 @@ resolution.
 | `Camera/CameraModel.swift` | Capture session, shutter, save |
 | `Camera/CIImage+Square.swift` | The centred 1:1 crop shared by preview and capture |
 | `Camera/PhotoEncoder.swift` | JPEG encoding, and the settings embedded in EXIF |
+| `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
 | `Library/ShotStore.swift` | Every shot on disk, and the zip bundle |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
 | `Views/FilterPanel.swift` | The slider editor and its action bar |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
+
+## RAW
+
+With **Capture RAW** on, Snap asks the sensor for Bayer RAW and develops it
+itself through `CIRAWFilter`, with Apple's cosmetic processing switched off —
+luminance and colour noise reduction, sharpening, detail enhancement, contrast,
+moiré reduction, local tone mapping and gamut mapping all set to zero. The look
+is then applied to *that*, rather than to a JPEG Apple has already finished.
+
+Bayer rather than Apple ProRAW on purpose: ProRAW arrives demosaiced and
+already carrying Apple's rendering, which is the thing being stepped around.
+
+Worth being clear about what RAW can and can't mean here. A DNG holds
+undemosaiced sensor data, so there is no way to write a grade *into* one — the
+look would have to survive being re-mosaiced, which throws away most of what it
+did. So the grade moves to the other end of the pipeline instead: the sensor
+data is developed here, graded here, and written out as JPEG, while the
+untouched DNG is attached to the same camera-roll asset as its alternate
+resource. Photos shows one photo that still carries its negative, editable in
+anything that reads DNG.
+
+### The one control that isn't zeroed
+
+**Apple Tone Curve** maps onto `CIRAWFilter.boostAmount`, and it defaults to 0
+— the fullest bypass the API offers, giving a linear response to the scene.
+
+That has a visible consequence: the live preview is fed by
+`AVCaptureVideoDataOutput`, which has no RAW equivalent, so the preview always
+shows Apple-processed frames. At a boost of 0 a RAW capture therefore starts
+flatter than what the preview showed. Raising the slider trades bypass for
+agreement with the preview; 100 is Apple's own rendering. Everything else on
+the list above stays off regardless.
 
 ## Every photo carries its settings
 
@@ -76,7 +109,7 @@ with use, and Delete is the way to reclaim it.
 
 **Filter** (bottom right) replaces the lower half of the screen with every knob
 the look exposes, grouped the way Lightroom groups them — Basic, Tone Curve,
-Color Mixer, Calibration, Grain. Moving a slider regrades the live preview.
+Color Mixer, Calibration, Noise, RAW. Moving a slider regrades the live preview.
 Double-tap any slider to return it to neutral.
 
 A sticky bar sits under the sliders:
@@ -109,7 +142,7 @@ only the newest survives.
 An approximation of the Ricoh GR II *Positive Film* image control: punchy
 midtone contrast, recovered highlights, a crushed black point under lifted
 shadows, crushed yellows and greens shifted toward aqua, reds and blues held or
-pushed, magentas taken almost out, and a fine grain over the whole frame.
+pushed, magentas taken almost out, and very fine noise over the whole frame.
 
 Everything that is a pure function of colour — camera calibration, contrast,
 vibrance, the eight-band HSL mixer, the tone curve — is baked once into a 64³
@@ -123,11 +156,19 @@ grain. Both the unsharp radius and the grain size are fractions of the image
 rather than fixed pixel counts, which is what keeps the 1080px preview and the
 full-resolution capture looking like the same photograph.
 
-Grain is blended in `overlay`, which earns its keep: a foreground of exactly
+Noise is blended in `overlay`, which earns its keep: a foreground of exactly
 0.5 is a no-op, and the response scales with `2 × backdrop` in the shadows and
-`2 × (1 − backdrop)` in the highlights. So grain peaks in the midtones and
-fades at both ends the way film does, with no mask. At the default amount that
-is 2.4% deviation at midtone against 0.1% at either extreme.
+`2 × (1 − backdrop)` in the highlights. So noise peaks in the midtones and
+fades at both ends, with no mask. At the default amount that is 1.5% deviation
+at midtone against 0.06% at either extreme.
+
+There is deliberately no size control. Scaling a noise field up is what turns
+noise into grain: at a reference-relative scale a full-resolution capture was
+getting 2.8 output pixels per sample, and the samples smear into visible
+clumps. The field is left at 1:1 at every resolution, so the only knob is how
+much of it there is. Each capture also draws from a different patch of the
+field — one shared pattern across every frame reads as sensor dirt rather than
+noise.
 
 One deliberate deviation from the source profile: it lists Green as Hue −35 but
 annotates it *"shift toward aqua/blue"*, and in Lightroom a negative green hue

@@ -30,6 +30,8 @@ struct CameraView: View {
                 if isEditingFilter {
                     FilterPanel(look: camera.look,
                                 isBusy: camera.isCapturing,
+                                isRAWEnabled: $camera.isRAWEnabled,
+                                isRAWAvailable: camera.isRAWAvailable,
                                 onSnap: { camera.capture() },
                                 onSave: { camera.capture(titled: true) },
                                 onLoad: { isLoadingLook = true },

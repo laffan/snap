@@ -51,6 +51,20 @@ final class CameraModel: NSObject, ObservableObject {
     /// camera roll, which is what the film strip reads from.
     let store = ShotStore()
 
+    /// Set once the session is configured: true when the sensor can hand us
+    /// Bayer RAW.
+    @Published private(set) var isRAWAvailable = false
+
+    /// Whether to capture RAW. Persisted, and ignored when unavailable.
+    @Published var isRAWEnabled: Bool = UserDefaults.standard.object(forKey: CameraModel.rawDefaultsKey) as? Bool ?? true {
+        didSet { UserDefaults.standard.set(isRAWEnabled, forKey: CameraModel.rawDefaultsKey) }
+    }
+
+    private static let rawDefaultsKey = "SnapCapturesRAW"
+
+    /// The Bayer format to ask for, resolved at configuration time.
+    private var rawPixelFormat: OSType?
+
     /// Whether the capture in flight should end at the naming sheet.
     /// Only one capture runs at a time (`isCapturing` guards it), so a single
     /// slot is enough.
@@ -98,6 +112,9 @@ final class CameraModel: NSObject, ObservableObject {
             if !self.isConfigured {
                 do {
                     try self.configureSession()
+                    // Only meaningful once the configuration is committed,
+                    // which the `defer` in configureSession has just done.
+                    self.resolveRAWSupport()
                     self.isConfigured = true
                 } catch {
                     self.setState(.failed(error.localizedDescription))
@@ -165,6 +182,19 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
+    /// Bayer RAW rather than Apple ProRAW: ProRAW is already demosaiced and
+    /// carries Apple's rendering, which is the thing we are trying to step
+    /// around. `isAppleProRAWEnabled` stays off so this list stays Bayer.
+    private func resolveRAWSupport() {
+        let bayerFormat = photoOutput.availableRawPhotoPixelFormatTypes.first {
+            AVCapturePhotoOutput.isBayerRAWPixelFormat($0)
+        }
+        rawPixelFormat = bayerFormat
+        DispatchQueue.main.async { [weak self] in
+            self?.isRAWAvailable = bayerFormat != nil
+        }
+    }
+
     // MARK: - Capture
 
     /// Takes a photo. Every capture is written as a JPEG carrying its own
@@ -179,13 +209,29 @@ final class CameraModel: NSObject, ObservableObject {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
 
+        let wantsRAW = isRAWEnabled
+
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            let settings = AVCapturePhotoSettings()
-            settings.photoQualityPrioritization = .quality
-            settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
-            self.photoOutput.capturePhoto(with: settings, delegate: self)
+            self.photoOutput.capturePhoto(with: self.makeSettings(rawIfPossible: wantsRAW),
+                                          delegate: self)
         }
+    }
+
+    private func makeSettings(rawIfPossible: Bool) -> AVCapturePhotoSettings {
+        // RAW-only: there is no point paying for a processed companion we would
+        // throw away, since the look is applied to the sensor data instead.
+        if rawIfPossible, let rawPixelFormat {
+            return AVCapturePhotoSettings(rawPixelFormatType: rawPixelFormat,
+                                          processedFormat: nil)
+        }
+
+        let settings = AVCapturePhotoSettings()
+        // Neither of these applies to a RAW capture — the sensor decides the
+        // dimensions and there is no processing to prioritise.
+        settings.photoQualityPrioritization = .quality
+        settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        return settings
     }
 
     private func flashShutter() {
@@ -247,30 +293,58 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        guard let data = photo.fileDataRepresentation(),
-              let raw = CIImage(data: data, options: [.applyOrientationProperty: true]) else {
+        guard let data = photo.fileDataRepresentation() else {
             finishCapture(error: "The photo could not be read.")
             return
         }
 
-        // Same crop, same look, same order as the preview — just at full size,
-        // and always through a full-resolution LUT even if the preview was
-        // running on a draft one mid-drag.
         let profile = capturedProfile
-        let graded = look.finalFilter(for: profile).apply(to: raw.centerSquareCropped())
         let sourceMetadata = photo.metadata
+        let isRAW = photo.isRawPhoto
         let wantsTitle = self.wantsTitle
+
+        // Every photo gets its own patch of the noise field. Sharing one would
+        // put an identical fixed pattern on every frame, which reads as sensor
+        // dirt rather than noise.
+        let noiseOffset = CGPoint(x: CGFloat.random(in: 0...8192),
+                                  y: CGFloat.random(in: 0...8192))
 
         Task { [weak self] in
             guard let self else { return }
             do {
+                // A RAW capture is demosaiced here rather than by Apple, so the
+                // look lands on sensor data instead of on their finished JPEG.
+                let upright: CIImage
+                if isRAW {
+                    upright = try RAWDeveloper.develop(
+                        dngData: data,
+                        profile: profile,
+                        orientation: RAWDeveloper.orientation(from: sourceMetadata)
+                    )
+                } else {
+                    guard let decoded = CIImage(data: data,
+                                                options: [.applyOrientationProperty: true]) else {
+                        throw RAWDeveloper.DevelopError.undecodable
+                    }
+                    upright = decoded
+                }
+
+                // Same crop, same look, same order as the preview — just at
+                // full size, and always through a full-resolution LUT even if
+                // the preview was running on a draft one mid-drag.
+                let graded = self.look.finalFilter(for: profile)
+                    .apply(to: upright.centerSquareCropped(), noiseOffset: noiseOffset)
+
                 let jpeg = try PhotoEncoder.jpeg(from: graded,
                                                  profile: profile,
                                                  sourceMetadata: sourceMetadata,
                                                  context: self.stillContext)
 
                 let shot = try self.store.add(imageData: jpeg, profile: profile)
-                try await self.library.save(jpeg, type: .jpeg)
+                // The negative goes to the camera roll alongside the graded
+                // frame rather than into the app's store, so it stays editable
+                // in Photos without doubling what Bundle has to carry.
+                try await self.library.save(jpeg, rawData: isRAW ? data : nil)
 
                 if wantsTitle {
                     await MainActor.run { self.pendingTitle = shot }

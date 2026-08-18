@@ -14,6 +14,8 @@ struct FilterPanel: View {
     @ObservedObject var look: LookModel
 
     var isBusy: Bool
+    @Binding var isRAWEnabled: Bool
+    var isRAWAvailable: Bool
     var onSnap: () -> Void
     var onSave: () -> Void
     var onLoad: () -> Void
@@ -35,7 +37,8 @@ struct FilterPanel: View {
                     toneCurve
                     colorMixer
                     calibration
-                    grain
+                    noise
+                    raw
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -141,12 +144,43 @@ struct FilterPanel: View {
         .padding(.bottom, 6)
     }
 
-    private var grain: some View {
-        FilterSection(title: "Grain") {
-            SliderRow(label: "Amount", value: $look.profile.grainAmount,
+    private var noise: some View {
+        FilterSection(title: "Noise") {
+            SliderRow(label: "Amount", value: $look.profile.noiseAmount,
                       range: 0...100, onEditingChanged: editing)
-            SliderRow(label: "Size", value: $look.profile.grainSize,
-                      range: 0.5...4, decimals: 2, neutral: 1, onEditingChanged: editing)
+        }
+    }
+
+    @ViewBuilder
+    private var raw: some View {
+        FilterSection(title: "RAW") {
+            if isRAWAvailable {
+                Toggle(isOn: $isRAWEnabled) {
+                    Text("Capture RAW")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+                .tint(.white.opacity(0.85))
+
+                Text("Develops the sensor data here, with Apple's noise reduction, sharpening and local tone mapping off. The DNG is kept alongside the photo.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                SliderRow(label: "Apple Tone Curve", value: $look.profile.rawBoost,
+                          range: 0...100, onEditingChanged: editing)
+                    .disabled(!isRAWEnabled)
+                    .opacity(isRAWEnabled ? 1 : 0.4)
+
+                Text("0 is the fullest bypass and gives a linear response to the scene, which starts flatter than the live preview. Raise it to meet the preview.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("This camera doesn't offer Bayer RAW.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
         }
     }
 

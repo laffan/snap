@@ -88,14 +88,23 @@ struct PositiveFilmProfile: Codable, Equatable {
     var greenPrimary = Primary(hue: -10, saturation:   0)
     var bluePrimary  = Primary(hue: +10, saturation: -10)
 
-    // MARK: - Grain
+    // MARK: - Noise
 
-    /// Grain strength, 0...100.
-    var grainAmount: Float = 14
+    /// Noise strength, 0...100.
+    ///
+    /// Deliberately has no size control: the noise is generated one sample per
+    /// pixel, which is what keeps it a fine texture rather than the clumps a
+    /// scaled-up noise field produces.
+    var noiseAmount: Float = 15
 
-    /// Grain size relative to a 1080px frame, 0.5...4. Kept relative so the
-    /// preview and the full-resolution capture get the same apparent texture.
-    var grainSize: Float = 1
+    // MARK: - RAW
+
+    /// How much of Apple's global tone curve to keep when developing a RAW
+    /// capture, 0...100, mapped onto `CIRAWFilter.boostAmount`.
+    ///
+    /// 0 is the most complete bypass and gives a linear response to the scene;
+    /// 100 is Apple's own rendering. Only used on the RAW path.
+    var rawBoost: Float = 0
 
     // MARK: - Slider → renderer conversions
 
@@ -140,11 +149,11 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// full-resolution capture look like the same photograph.
     var clarityRadiusFraction: Float { 0.018 }
 
-    /// Peak-to-peak grain deviation fed to the overlay blend.
-    var grainIntensity: Float { grainAmount / 100 * 0.35 }
+    /// Peak-to-peak noise deviation fed to the overlay blend.
+    var noiseIntensity: Float { noiseAmount / 100 * 0.20 }
 
-    /// The frame width the grain size is defined against.
-    static let grainReferenceWidth: CGFloat = 1080
+    /// `CIRAWFilter.boostAmount`, 0...1.
+    var rawBoostAmount: Float { rawBoost / 100 }
 }
 
 // MARK: - Lenient decoding
@@ -163,7 +172,8 @@ extension PositiveFilmProfile {
         case toneCurveS, blackLift
         case bands
         case redPrimary, greenPrimary, bluePrimary
-        case grainAmount, grainSize
+        case noiseAmount
+        case rawBoost
     }
 
     init(from decoder: Decoder) throws {
@@ -186,8 +196,8 @@ extension PositiveFilmProfile {
         toneCurveS = float(.toneCurveS, toneCurveS)
         blackLift  = float(.blackLift, blackLift)
 
-        grainAmount = float(.grainAmount, grainAmount)
-        grainSize   = float(.grainSize, grainSize)
+        noiseAmount = float(.noiseAmount, noiseAmount)
+        rawBoost    = float(.rawBoost, rawBoost)
 
         if let decoded = ((try? container.decodeIfPresent([HSLBand].self, forKey: .bands)) ?? nil),
            !decoded.isEmpty {
