@@ -55,17 +55,19 @@ final class CameraModel: NSObject, ObservableObject {
     /// Bayer RAW.
     @Published private(set) var isRAWAvailable = false
 
-    /// Whether the last RAW capture's square crop could be written into the
-    /// DNG itself. Nil until one has been taken. When false the crop rides in
-    /// the sidecar instead, which only Camera Raw and friends will read.
-    @Published private(set) var didCropNegative: Bool? = nil
+    /// What could actually be written into the last negative. Nil until a RAW
+    /// capture has been taken.
+    @Published private(set) var negativeStatus: NegativeStatus? = nil
 
-    /// Whether to capture RAW. Persisted, and ignored when unavailable.
-    @Published var isRAWEnabled: Bool = UserDefaults.standard.object(forKey: CameraModel.rawDefaultsKey) as? Bool ?? true {
-        didSet { UserDefaults.standard.set(isRAWEnabled, forKey: CameraModel.rawDefaultsKey) }
+    struct NegativeStatus {
+        /// The square was written into the DNG's own default-crop rectangle,
+        /// so every converter sees it — not just the ones that read XMP.
+        var croppedInFile: Bool
+        /// The Camera Raw settings were embedded in the DNG. Adobe stores
+        /// settings inside a DNG rather than beside it, so this is what makes
+        /// the look travel reliably.
+        var settingsEmbedded: Bool
     }
-
-    private static let rawDefaultsKey = "SnapCapturesRAW"
 
     /// The Bayer format to ask for, resolved at configuration time.
     private var rawPixelFormat: OSType?
@@ -214,26 +216,25 @@ final class CameraModel: NSObject, ObservableObject {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
 
-        let wantsRAW = isRAWEnabled
-
         sessionQueue.async { [weak self] in
             guard let self else { return }
-            self.photoOutput.capturePhoto(with: self.makeSettings(rawIfPossible: wantsRAW),
-                                          delegate: self)
+            self.photoOutput.capturePhoto(with: self.makeSettings(), delegate: self)
         }
     }
 
-    private func makeSettings(rawIfPossible: Bool) -> AVCapturePhotoSettings {
-        // RAW-only: there is no point paying for a processed companion we would
-        // throw away, since the look is applied to the sensor data instead.
-        if rawIfPossible, let rawPixelFormat {
+    /// Asks for sensor data and nothing else.
+    ///
+    /// `processedFormat: nil` means AVFoundation produces no JPEG at all — the
+    /// capture is the negative, and the JPEG is something Snap derives from it
+    /// afterwards. The processed path below is only for cameras that can't
+    /// deliver Bayer RAW.
+    private func makeSettings() -> AVCapturePhotoSettings {
+        if let rawPixelFormat {
             return AVCapturePhotoSettings(rawPixelFormatType: rawPixelFormat,
                                           processedFormat: nil)
         }
 
         let settings = AVCapturePhotoSettings()
-        // Neither of these applies to a RAW capture — the sensor decides the
-        // dimensions and there is no processing to prioritise.
         settings.photoQualityPrioritization = .quality
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         return settings
@@ -346,17 +347,25 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                 var xmp: String?
 
                 if isRAW {
-                    // Try to square the file itself first — that narrows its
+                    // Square the file itself first — that narrows its
                     // default-crop rectangle without moving a pixel, and holds
                     // in every converter. If iOS won't author the container,
-                    // the same rectangle travels in the sidecar instead.
+                    // the same rectangle travels in the XMP instead. Only ever
+                    // one of the two, or the frame would be cropped twice.
                     let squared = RAWCropper.squareCropped(data)
-                    negative = squared ?? data
                     let cropInXMP = squared == nil ? RAWCropper.squareCropFractions(data) : nil
-                    xmp = CameraRawSidecar.xmp(for: profile, crop: cropInXMP)
+                    let settings = CameraRawSidecar.xmp(for: profile, crop: cropInXMP)
 
-                    let cropped = squared != nil
-                    await MainActor.run { self.didCropNegative = cropped }
+                    // Adobe keeps develop settings inside a DNG rather than
+                    // beside it, so embedding is what actually makes the look
+                    // travel. The sidecar is written either way as a fallback.
+                    let embedded = RAWCropper.embedding(settings, into: squared ?? data)
+                    negative = embedded ?? squared ?? data
+                    xmp = settings
+
+                    let status = NegativeStatus(croppedInFile: squared != nil,
+                                                settingsEmbedded: embedded != nil)
+                    await MainActor.run { self.negativeStatus = status }
                 }
 
                 let shot = try self.store.add(imageData: jpeg,

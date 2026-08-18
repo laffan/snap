@@ -19,6 +19,8 @@ struct CameraView: View {
     @State private var share: ShareItem? = nil
     /// A saved frame being viewed in place of the live preview.
     @State private var viewing: Shot? = nil
+    /// True while the viewer is being held down to show the negative.
+    @State private var showsRAW = false
 
     private var store: ShotStore { camera.store }
 
@@ -26,13 +28,13 @@ struct CameraView: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 viewer(edge: geometry.size.width)
+                sourceIndicator
 
                 if isEditingFilter {
                     FilterPanel(look: camera.look,
                                 isBusy: camera.isCapturing,
-                                isRAWEnabled: $camera.isRAWEnabled,
                                 isRAWAvailable: camera.isRAWAvailable,
-                                didCropNegative: camera.didCropNegative,
+                                negativeStatus: camera.negativeStatus,
                                 onSnap: { camera.capture() },
                                 onSave: { camera.capture(titled: true) },
                                 onLoad: { isLoadingLook = true },
@@ -99,7 +101,7 @@ struct CameraView: View {
     private func viewer(edge: CGFloat) -> some View {
         ZStack {
             if let viewing {
-                ShotView(store: store, shot: viewing, edge: edge)
+                ShotView(store: store, shot: viewing, edge: edge, showsRAW: $showsRAW)
             } else {
                 livePreview
             }
@@ -125,6 +127,24 @@ struct CameraView: View {
         case .failed(let reason):
             message(reason, showsSettingsLink: false)
         }
+    }
+
+    /// Names what the viewer is currently showing. Only meaningful while a
+    /// saved frame is up — the live preview is neither.
+    @ViewBuilder
+    private var sourceIndicator: some View {
+        HStack {
+            Spacer()
+            Text(showsRAW ? "RAW" : "JPEG")
+                .font(.system(size: 10, weight: .medium))
+                .tracking(1.1)
+                .foregroundStyle(.white.opacity(showsRAW ? 0.85 : 0.35))
+                .animation(.easeOut(duration: 0.12), value: showsRAW)
+        }
+        .padding(.trailing, 14)
+        .padding(.top, 6)
+        .frame(height: 18)
+        .opacity(viewing == nil ? 0 : 1)
     }
 
     // MARK: - Controls
@@ -203,28 +223,58 @@ struct CameraView: View {
 }
 
 /// A saved frame shown in the viewer area.
+///
+/// Holding on it swaps to the negative — same square, no look — so the two can
+/// be compared without leaving the screen.
 private struct ShotView: View {
 
     @ObservedObject var store: ShotStore
     let shot: Shot
     let edge: CGFloat
+    @Binding var showsRAW: Bool
 
-    @State private var image: UIImage? = nil
+    @State private var jpeg: UIImage? = nil
+    @State private var raw: UIImage? = nil
+
+    private var hasRAW: Bool { store.rawURL(for: shot) != nil }
 
     var body: some View {
         ZStack {
             Color.black
-            if let image {
+
+            if let image = (showsRAW ? raw : jpeg) ?? jpeg {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             }
         }
+        .contentShape(Rectangle())
+        .onLongPressGesture(minimumDuration: 0.25, pressing: { pressing in
+            if !pressing { showsRAW = false }
+        }, perform: {
+            guard hasRAW, raw != nil else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showsRAW = true
+        })
         .task(id: shot.id) {
-            let url = store.imageURL(for: shot)
+            showsRAW = false
             let pixels = edge * 3
-            image = await Task.detached(priority: .userInitiated) {
-                ShotStore.image(at: url, maxPixelSize: pixels)
+
+            let jpegURL = store.imageURL(for: shot)
+            jpeg = await Task.detached(priority: .userInitiated) {
+                ShotStore.image(at: jpegURL, maxPixelSize: pixels)
+            }.value
+
+            // Developed up front, not on the gesture — demosaicing takes long
+            // enough that peeking would otherwise stutter.
+            raw = nil
+            guard let rawURL = store.rawURL(for: shot) else { return }
+            let profile = shot.profile
+            raw = await Task.detached(priority: .utility) {
+                RAWDeveloper.previewImage(at: rawURL,
+                                          profile: profile,
+                                          maxPixelSize: pixels,
+                                          context: CIContext(options: [.cacheIntermediates: false]))
             }.value
         }
     }

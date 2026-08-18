@@ -14,9 +14,8 @@ struct FilterPanel: View {
     @ObservedObject var look: LookModel
 
     var isBusy: Bool
-    @Binding var isRAWEnabled: Bool
     var isRAWAvailable: Bool
-    var didCropNegative: Bool?
+    var negativeStatus: CameraModel.NegativeStatus?
     var onSnap: () -> Void
     var onSave: () -> Void
     var onLoad: () -> Void
@@ -148,51 +147,43 @@ struct FilterPanel: View {
     private var raw: some View {
         FilterSection(title: "RAW") {
             if isRAWAvailable {
-                Toggle(isOn: $isRAWEnabled) {
-                    Text("Capture RAW")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-                .tint(.white.opacity(0.85))
+                note("Every shot is captured as sensor data — no JPEG is asked of the camera. The negative is developed here with Apple's noise reduction, sharpening and local tone mapping off, then cropped and graded into the JPEG.")
 
-                Text("Develops the sensor data here, with Apple's noise reduction, sharpening and local tone mapping off. The DNG is kept in the app, shareable from the roll.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(cropStatus)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .fixedSize(horizontal: false, vertical: true)
+                note(negativeNote)
 
                 SliderRow(label: "Apple Tone Curve", value: $look.profile.rawBoost,
                           range: 0...100, onEditingChanged: editing)
-                    .disabled(!isRAWEnabled)
-                    .opacity(isRAWEnabled ? 1 : 0.4)
 
-                Text("0 is the fullest bypass and gives a linear response to the scene, which starts flatter than the live preview. Raise it to meet the preview.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .fixedSize(horizontal: false, vertical: true)
+                note("0 is the fullest bypass and gives a linear response to the scene, which starts flatter than the live preview. Raise it to meet the preview.")
             } else {
-                Text("This camera doesn't offer Bayer RAW.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.4))
+                note("This camera doesn't offer Bayer RAW, so captures fall back to the processed frame.")
             }
         }
     }
 
-    /// Reports what actually happened to the last negative rather than what
-    /// the API advertises — guessing from the writable-type list is what hid
-    /// the failure before.
-    private var cropStatus: String {
-        switch didCropNegative {
-        case .some(true):
-            return "The square crop is written into the DNG, so it holds in any converter. Settings travel in a .xmp sidecar."
-        case .some(false):
-            return "iOS wouldn't rewrite the DNG, so the crop and the settings both travel in a .xmp sidecar. Keep the two files together — Lightroom, Camera Raw and Bridge read it; Photos and Preview will show the full frame."
-        case .none:
-            return "Crop and settings are written for Camera Raw as a .xmp sidecar beside the DNG. Share RAW sends both."
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.white.opacity(0.4))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Reports what actually landed in the last negative rather than what the
+    /// APIs advertise — guessing from the writable-type list is what hid the
+    /// first failure.
+    private var negativeNote: String {
+        guard let negativeStatus else {
+            return "The crop and the look are written for Camera Raw. Take a shot to see how much of it lands in the DNG itself."
+        }
+        switch (negativeStatus.croppedInFile, negativeStatus.settingsEmbedded) {
+        case (true, true):
+            return "Last negative: square crop written into the DNG, settings embedded. Any converter sees the crop; Lightroom sees the look."
+        case (true, false):
+            return "Last negative: square crop written into the DNG, but the settings wouldn't embed — they're in the .xmp sidecar, which Lightroom often skips for DNG files."
+        case (false, true):
+            return "Last negative: crop and settings both embedded in the DNG. Lightroom sees both; Photos and Preview show the full frame."
+        case (false, false):
+            return "Last negative: iOS wouldn't rewrite the DNG, so crop and settings are only in the .xmp sidecar. Keep the two files together, and use Metadata ▸ Read Metadata from File in Lightroom Classic."
         }
     }
 

@@ -17,6 +17,10 @@
 //  When it doesn't work, `squareCropFractions` gives the same rectangle in the
 //  form Camera Raw wants, and the crop travels in the XMP instead.
 //
+//  `embedding(_:into:)` does the other half: Adobe stores develop settings
+//  *inside* a DNG rather than in a sidecar beside it, so getting the look into
+//  the file is what makes it travel reliably.
+//
 
 import Foundation
 import ImageIO
@@ -59,6 +63,44 @@ enum RAWCropper {
         CGImageDestinationAddImageFromSource(destination, source, 0, updated as CFDictionary)
         guard CGImageDestinationFinalize(destination), output.length > 0 else { return nil }
 
+        return output as Data
+    }
+
+    // MARK: - Embedding settings
+
+    /// Writes Camera Raw settings into the DNG itself.
+    ///
+    /// A sidecar is the documented mechanism for proprietary raw formats, but
+    /// for DNG Adobe reads and writes metadata inside the file — so a `.xmp`
+    /// sitting beside a `.dng` is easily ignored. Returns nil when the
+    /// container can't be rewritten, in which case the sidecar is all there is.
+    static func embedding(_ xmp: String, into dngData: Data) -> Data? {
+        guard let xmpData = xmp.data(using: .utf8),
+              let metadata = CGImageMetadataCreateFromXMPData(xmpData as CFData),
+              let source = CGImageSourceCreateWithData(dngData as CFData, nil),
+              let type = CGImageSourceGetType(source) else {
+            return nil
+        }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, type, 1, nil) else {
+            return nil
+        }
+
+        // CopyImageSource is the metadata-only path: it rewrites the container
+        // without touching the image data.
+        var error: Unmanaged<CFError>?
+        let options: [CFString: Any] = [
+            kCGImageDestinationMetadata: metadata,
+            kCGImageDestinationMergeMetadata: true,
+        ]
+        let copied = CGImageDestinationCopyImageSource(destination,
+                                                       source,
+                                                       options as CFDictionary,
+                                                       &error)
+        error?.release()
+
+        guard copied, output.length > 0 else { return nil }
         return output as Data
     }
 
