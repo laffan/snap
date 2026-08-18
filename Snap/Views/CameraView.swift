@@ -35,21 +35,19 @@ struct CameraView: View {
                                 isBusy: camera.isCapturing,
                                 isRAWAvailable: camera.isRAWAvailable,
                                 negativeStatus: camera.negativeStatus,
-                                onSnap: { camera.capture() },
-                                onSave: { camera.capture(titled: true) },
+                                primaryTitle: camera.versionSource == nil ? "Snap" : "Version",
+                                onSnap: { primaryAction(titled: false) },
+                                onSave: { primaryAction(titled: true) },
                                 onLoad: { isLoadingLook = true },
                                 onBundle: makeBundle,
-                                onClose: { setEditing(false) })
+                                onClose: { setEditing(false) }) {
+                        roll(selection: camera.versionSource, onSelect: selectForVersion)
+                    }
                 } else {
                     Spacer(minLength: 0)
                     controlRow
                     Spacer(minLength: 0)
-                    FilmStrip(store: store,
-                              selection: viewing,
-                              onSelect: { viewing = $0 },
-                              onUseLook: useLook,
-                              onShare: { share = ShareItem($0) },
-                              onDelete: delete)
+                    roll(selection: viewing, onSelect: { viewing = $0 })
                         .padding(.bottom, 10)
                 }
             }
@@ -131,20 +129,35 @@ struct CameraView: View {
 
     /// Names what the viewer is currently showing. Only meaningful while a
     /// saved frame is up — the live preview is neither.
+    private var indicatorLabel: String {
+        if camera.versionSource != nil { return "VERSION" }
+        guard viewing != nil else { return "" }
+        return showsRAW ? "RAW" : "JPEG"
+    }
+
     @ViewBuilder
     private var sourceIndicator: some View {
         HStack {
             Spacer()
-            Text(showsRAW ? "RAW" : "JPEG")
+            Text(indicatorLabel)
                 .font(.system(size: 10, weight: .medium))
                 .tracking(1.1)
-                .foregroundStyle(.white.opacity(showsRAW ? 0.85 : 0.35))
+                .foregroundStyle(.white.opacity(showsRAW || camera.versionSource != nil ? 0.85 : 0.35))
                 .animation(.easeOut(duration: 0.12), value: showsRAW)
         }
         .padding(.trailing, 14)
         .padding(.top, 6)
         .frame(height: 18)
-        .opacity(viewing == nil ? 0 : 1)
+        .opacity(indicatorLabel.isEmpty ? 0 : 1)
+    }
+
+    private func roll(selection: Shot?, onSelect: @escaping (Shot) -> Void) -> some View {
+        FilmStrip(store: store,
+                  selection: selection,
+                  onSelect: onSelect,
+                  onUseLook: useLook,
+                  onShare: { share = ShareItem($0) },
+                  onDelete: delete)
     }
 
     // MARK: - Controls
@@ -158,7 +171,6 @@ struct CameraView: View {
             }
 
             HStack {
-                Spacer()
                 Button {
                     setEditing(true)
                 } label: {
@@ -170,8 +182,15 @@ struct CameraView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                Spacer()
+
+                if viewing == nil, camera.exposureBiasRange.lowerBound < camera.exposureBiasRange.upperBound {
+                    ExposureStepper(value: $camera.exposureBias,
+                                    range: camera.exposureBiasRange)
+                }
             }
-            .padding(.trailing, 14)
+            .padding(.horizontal, 14)
         }
         .frame(maxWidth: .infinity)
     }
@@ -198,9 +217,34 @@ struct CameraView: View {
     private func setEditing(_ editing: Bool) {
         withAnimation(.easeInOut(duration: 0.22)) {
             isEditingFilter = editing
-            // The strip goes away with the shutter, so a frame being viewed
-            // would have no way back.
-            if editing { viewing = nil }
+            // The viewer is either the live camera, a saved frame, or a
+            // negative being re-filtered — never two at once.
+            if editing {
+                viewing = nil
+            } else {
+                camera.endVersioning()
+            }
+        }
+    }
+
+    /// Snap and Save both go through here: they take a live frame normally,
+    /// and re-filter the loaded negative when there is one, so the action bar
+    /// always acts on whatever the viewer is showing.
+    private func primaryAction(titled: Bool) {
+        if camera.versionSource == nil {
+            camera.capture(titled: titled)
+        } else {
+            camera.captureVersion(titled: titled)
+        }
+    }
+
+    /// Tapping a frame while the filter panel is open loads its negative under
+    /// the sliders; tapping the same one again lets the camera back through.
+    private func selectForVersion(_ shot: Shot) {
+        if camera.versionSource?.id == shot.id {
+            camera.endVersioning()
+        } else {
+            camera.beginVersioning(from: shot)
         }
     }
 
@@ -210,6 +254,7 @@ struct CameraView: View {
 
     private func delete(_ shot: Shot) {
         if viewing?.id == shot.id { viewing = nil }
+        if camera.versionSource?.id == shot.id { camera.endVersioning() }
         store.delete(shot)
     }
 

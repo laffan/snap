@@ -9,18 +9,22 @@
 
 import SwiftUI
 
-struct FilterPanel: View {
+struct FilterPanel<Strip: View>: View {
 
     @ObservedObject var look: LookModel
 
     var isBusy: Bool
     var isRAWAvailable: Bool
     var negativeStatus: CameraModel.NegativeStatus?
+    /// "Snap" for a live capture, "Version" when a stored negative is loaded.
+    var primaryTitle: String
     var onSnap: () -> Void
     var onSave: () -> Void
     var onLoad: () -> Void
     var onBundle: () -> Void
     var onClose: () -> Void
+    /// The roll, handed in so the panel doesn't need to know about the store.
+    @ViewBuilder var strip: Strip
 
     private var editing: (Bool) -> Void {
         { look.setInteracting($0) }
@@ -45,6 +49,9 @@ struct FilterPanel: View {
             }
             .scrollIndicators(.hidden)
 
+            Divider().overlay(Color.white.opacity(0.12))
+            strip
+                .padding(.vertical, 8)
             Divider().overlay(Color.white.opacity(0.12))
             actionBar
         }
@@ -191,7 +198,7 @@ struct FilterPanel: View {
 
     private var actionBar: some View {
         HStack(spacing: 0) {
-            action("Snap", weight: .semibold, action: onSnap)
+            action(primaryTitle, weight: .semibold, action: onSnap)
             action("Save", action: onSave)
             action("Load", action: onLoad)
             action("Bundle", action: onBundle)

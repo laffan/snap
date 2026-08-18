@@ -86,22 +86,17 @@ enum RAWDeveloper {
         return image
     }
 
-    /// The negative as it stands, cropped to the same square as the JPEG and
-    /// with no look applied — what the hold-to-peek gesture shows.
-    static func previewImage(at url: URL,
-                             profile: PositiveFilmProfile,
-                             maxPixelSize: CGFloat,
-                             context: CIContext) -> UIImage? {
-        guard let data = try? Data(contentsOf: url),
-              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
-            return nil
-        }
+    /// The negative developed and cropped to the same square as the JPEG, with
+    /// no look applied, at roughly the size asked for.
+    ///
+    /// `CIRAWFilter` can demosaic straight to a smaller image, so a viewer-sized
+    /// preview never pays for a full-sensor development.
+    static func developedImage(at url: URL,
+                               profile: PositiveFilmProfile,
+                               maxPixelSize: CGFloat) -> CIImage? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let properties = self.properties(of: data)
 
-        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] ?? [:]
-        let orientation = (properties[kCGImagePropertyOrientation as String] as? UInt32)
-            .flatMap(CGImagePropertyOrientation.init(rawValue:))
-
-        // Enough resolution to fill the viewer, and no more.
         var scale: Float = 1
         if let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.doubleValue,
            width > 0 {
@@ -110,14 +105,32 @@ enum RAWDeveloper {
 
         guard let developed = try? develop(dngData: data,
                                            profile: profile,
-                                           orientation: orientation,
+                                           orientation: orientation(from: properties),
                                            scale: scale) else {
             return nil
         }
+        return developed.centerSquareCropped()
+    }
 
-        let square = developed.centerSquareCropped()
-        guard let cgImage = context.createCGImage(square, from: square.extent) else { return nil }
+    /// The negative as it stands — what the hold-to-peek gesture shows.
+    static func previewImage(at url: URL,
+                             profile: PositiveFilmProfile,
+                             maxPixelSize: CGFloat,
+                             context: CIContext) -> UIImage? {
+        guard let square = developedImage(at: url, profile: profile, maxPixelSize: maxPixelSize),
+              let cgImage = context.createCGImage(square, from: square.extent) else {
+            return nil
+        }
         return UIImage(cgImage: cgImage)
+    }
+
+    /// The file's own metadata, which the derived JPEG carries forward.
+    static func properties(of dngData: Data) -> [String: Any] {
+        guard let source = CGImageSourceCreateWithData(dngData as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else {
+            return [:]
+        }
+        return properties
     }
 
     /// Reads the orientation the sensor recorded, so the developed frame comes

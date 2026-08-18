@@ -135,6 +135,11 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
+Below the frame sit **Filter** on the left and exposure compensation on the
+right, with the shutter centred between them. Exposure moves the camera's own
+target bias in whole stops, so it is recorded into the negative rather than
+applied to it afterwards.
+
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
 that returns to the live preview. Long-press for **Use Filter Data** (puts that
 shot's settings back on the sliders), **Share JPEG**, **Share RAW** (only when
@@ -143,6 +148,24 @@ the capture was RAW), or **Delete Image**.
 Storing full-resolution copies is what makes Bundle and Share work on the
 original file rather than a thumbnail; it also means the app's storage grows
 with use, and Delete is the way to reclaim it.
+
+## Re-filtering a negative
+
+The roll also lives inside the filter panel. Tapping a frame there loads its
+negative under the sliders in place of the live camera, and moving a slider
+regrades it as you go — the label under the frame reads VERSION while this is
+happening. Tapping the same frame again hands the viewer back to the camera.
+
+**Snap** becomes **Version** while a negative is loaded, and runs the same
+pipeline the shutter does — develop, crop, grade, encode, square the DNG,
+embed the settings — over the stored sensor data instead of the sensor. The
+result is a new shot in its own right, not an edit of the old one, which is
+why both share `prepareNegative`: a captured file and a re-filtered one should
+be indistinguishable apart from where the photons came from.
+
+Re-grading is cheap because the negative is demosaiced once at viewer size and
+kept; only the **Apple Tone Curve** slider feeds the RAW pipeline itself, so
+only that one costs a re-develop.
 
 ## The filter editor
 
@@ -155,8 +178,8 @@ A sticky bar sits under the sliders:
 
 | Button | Does |
 | --- | --- |
-| **Snap** | Same as the shutter |
-| **Save** | Takes a shot and then asks for a title (defaults to the timestamp) and notes |
+| **Snap** / **Version** | Same as the shutter, or re-filters the loaded negative |
+| **Save** | The same, then asks for a title (defaults to the timestamp) and notes |
 | **Load** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
 | **Bundle** | Zips every image and settings file and hands it to the share sheet |
 

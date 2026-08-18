@@ -23,6 +23,11 @@ final class LookModel: ObservableObject {
         }
     }
 
+    /// Bumped whenever a freshly baked filter lands. The live camera preview
+    /// picks up new looks on its next frame, but a still being re-filtered has
+    /// no next frame — it redraws off this.
+    @Published private(set) var revision = 0
+
     /// True while a slider is being dragged. Drags bake at draft resolution so
     /// the preview keeps up; letting go commits a full-resolution bake.
     private var isInteracting = false
@@ -109,10 +114,15 @@ final class LookModel: ObservableObject {
             self.lock.lock()
             // A newer request may have landed while this was baking; don't let
             // a stale result overwrite it.
-            if self.requested == request {
+            let isNewest = self.requested == request
+            if isNewest {
                 self.bakedFilter = filter
             }
             self.lock.unlock()
+
+            if isNewest {
+                DispatchQueue.main.async { self.revision &+= 1 }
+            }
         }
     }
 }

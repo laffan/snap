@@ -7,6 +7,7 @@
 //
 
 import AVFoundation
+import Combine
 import CoreImage
 import ImageIO
 import SwiftUI
@@ -69,6 +70,38 @@ final class CameraModel: NSObject, ObservableObject {
         var settingsEmbedded: Bool
     }
 
+    /// Exposure compensation in whole stops. This moves the camera's own
+    /// exposure target bias, so it is recorded into the negative rather than
+    /// applied to it afterwards.
+    @Published var exposureBias: Int = 0 {
+        didSet {
+            guard exposureBias != oldValue else { return }
+            applyExposureBias()
+        }
+    }
+
+    /// What the current camera will accept, in whole stops.
+    @Published private(set) var exposureBiasRange: ClosedRange<Int> = 0...0
+
+    /// A stored negative being re-filtered in place of the live camera.
+    @Published private(set) var versionSource: Shot? = nil
+
+    /// The source developed once at preview size. Re-grading it is cheap;
+    /// re-developing it is not, so it is only redone when a setting that feeds
+    /// the RAW pipeline itself changes.
+    private var developedSource: CIImage?
+    private var developedBoost: Float?
+    private var lookRevisionObserver: AnyCancellable?
+
+    /// Mirrors `versionSource != nil` for the capture queue, which reads it on
+    /// every frame and must not touch main-thread published state.
+    private let versionLock = NSLock()
+    private var isVersioning = false
+
+    private let developQueue = DispatchQueue(label: "com.snap.develop", qos: .userInitiated)
+
+    private var videoDevice: AVCaptureDevice?
+
     /// The Bayer format to ask for, resolved at configuration time.
     private var rawPixelFormat: OSType?
 
@@ -88,6 +121,13 @@ final class CameraModel: NSObject, ObservableObject {
     private let previewEdge: CGFloat = 1080
 
     private var isConfigured = false
+
+    override init() {
+        super.init()
+        lookRevisionObserver = look.$revision
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshVersionPreview() }
+    }
 
     // MARK: - Lifecycle
 
@@ -122,6 +162,7 @@ final class CameraModel: NSObject, ObservableObject {
                     // Only meaningful once the configuration is committed,
                     // which the `defer` in configureSession has just done.
                     self.resolveRAWSupport()
+                    self.resolveExposureRange()
                     self.isConfigured = true
                 } catch {
                     self.setState(.failed(error.localizedDescription))
@@ -158,6 +199,7 @@ final class CameraModel: NSObject, ObservableObject {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             throw SetupError.noCamera
         }
+        videoDevice = device
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else { throw SetupError.cannotAddInput }
         session.addInput(input)
@@ -185,6 +227,31 @@ final class CameraModel: NSObject, ObservableObject {
             guard let connection = output.connection(with: .video) else { continue }
             if connection.isVideoRotationAngleSupported(90) {
                 connection.videoRotationAngle = 90
+            }
+        }
+    }
+
+    private func resolveExposureRange() {
+        guard let videoDevice else { return }
+        // Whole stops inside whatever the device actually allows.
+        let lower = Int(videoDevice.minExposureTargetBias.rounded(.up))
+        let upper = Int(videoDevice.maxExposureTargetBias.rounded(.down))
+        guard lower <= upper else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.exposureBiasRange = lower...upper
+        }
+    }
+
+    private func applyExposureBias() {
+        let bias = Float(exposureBias)
+        sessionQueue.async { [weak self] in
+            guard let device = self?.videoDevice else { return }
+            do {
+                try device.lockForConfiguration()
+                device.setExposureTargetBias(bias)
+                device.unlockForConfiguration()
+            } catch {
+                // Nothing actionable — the next adjustment will try again.
             }
         }
     }
@@ -240,6 +307,143 @@ final class CameraModel: NSObject, ObservableObject {
         return settings
     }
 
+    // MARK: - Re-filtering a stored negative
+
+    /// Puts a stored negative under the sliders in place of the live camera.
+    func beginVersioning(from shot: Shot) {
+        guard let rawURL = store.rawURL(for: shot) else { return }
+        versionSource = shot
+        setVersioning(true)
+        developSource(at: rawURL)
+    }
+
+    func endVersioning() {
+        versionSource = nil
+        developedSource = nil
+        developedBoost = nil
+        setVersioning(false)
+        renderer.clear()
+    }
+
+    private func setVersioning(_ versioning: Bool) {
+        versionLock.lock()
+        isVersioning = versioning
+        versionLock.unlock()
+    }
+
+    private func developSource(at url: URL) {
+        let profile = look.profile
+        let edge = previewEdge
+
+        developQueue.async { [weak self] in
+            let developed = RAWDeveloper.developedImage(at: url,
+                                                        profile: profile,
+                                                        maxPixelSize: edge)
+            DispatchQueue.main.async {
+                guard let self, self.versionSource != nil else { return }
+                self.developedSource = developed
+                self.developedBoost = profile.rawBoost
+                self.refreshVersionPreview()
+            }
+        }
+    }
+
+    /// Redraws the negative under the current look. Applying a filter to a
+    /// CIImage only composes a recipe — the work happens when Metal draws — so
+    /// this is cheap enough to run on every slider tick.
+    private func refreshVersionPreview() {
+        guard let versionSource, let developedSource else { return }
+
+        // Everything except the RAW pipeline's own tone curve can be re-graded
+        // off the developed image; changing that means demosaicing again.
+        if developedBoost != look.profile.rawBoost, let url = store.rawURL(for: versionSource) {
+            developSource(at: url)
+            return
+        }
+
+        renderer.setImage(look.filter.apply(to: developedSource))
+    }
+
+    /// Runs the capture pipeline over the selected negative instead of the
+    /// sensor: develop, crop, grade, encode, and store as a new shot with its
+    /// own settings.
+    func captureVersion(titled: Bool = false) {
+        guard let shot = versionSource,
+              let rawURL = store.rawURL(for: shot),
+              !isCapturing else { return }
+
+        isCapturing = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        flashShutter()
+
+        let profile = look.profile
+        let wantsTitle = titled
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let data = try Data(contentsOf: rawURL)
+                let properties = RAWDeveloper.properties(of: data)
+
+                let upright = try RAWDeveloper.develop(
+                    dngData: data,
+                    profile: profile,
+                    orientation: RAWDeveloper.orientation(from: properties)
+                )
+                let graded = self.look.finalFilter(for: profile)
+                    .apply(to: upright.centerSquareCropped())
+
+                let jpeg = try PhotoEncoder.jpeg(from: graded,
+                                                 profile: profile,
+                                                 sourceMetadata: properties,
+                                                 context: self.stillContext)
+
+                let negative = self.prepareNegative(data, profile: profile)
+
+                let version = try self.store.add(imageData: jpeg,
+                                                 rawData: negative.data,
+                                                 xmp: negative.xmp,
+                                                 profile: profile)
+                try await self.library.save(jpeg)
+
+                if wantsTitle {
+                    await MainActor.run { self.pendingTitle = version }
+                }
+                self.finishCapture(error: nil)
+            } catch {
+                self.finishCapture(error: error.localizedDescription)
+            }
+        }
+    }
+
+    /// Squares the negative and writes the look into it, reporting what landed.
+    ///
+    /// Shared by a live capture and a re-filter so the two produce identical
+    /// files — the only difference between them is where the sensor data came
+    /// from.
+    private func prepareNegative(_ data: Data,
+                                 profile: PositiveFilmProfile) -> (data: Data, xmp: String) {
+        // Square the file itself first — that narrows its default-crop
+        // rectangle without moving a pixel, and holds in every converter. If
+        // iOS won't author the container, the same rectangle travels in the XMP
+        // instead. Only ever one of the two, or the frame would be cropped
+        // twice.
+        let squared = RAWCropper.squareCropped(data)
+        let cropInXMP = squared == nil ? RAWCropper.squareCropFractions(data) : nil
+        let settings = CameraRawSidecar.xmp(for: profile, crop: cropInXMP)
+
+        // Adobe keeps develop settings inside a DNG rather than beside it, so
+        // embedding is what actually makes the look travel. The sidecar is
+        // written either way as a fallback.
+        let embedded = RAWCropper.embedding(settings, into: squared ?? data)
+
+        let status = NegativeStatus(croppedInFile: squared != nil,
+                                    settingsEmbedded: embedded != nil)
+        DispatchQueue.main.async { [weak self] in self?.negativeStatus = status }
+
+        return (embedded ?? squared ?? data, settings)
+    }
+
     private func flashShutter() {
         withAnimation(.easeIn(duration: 0.06)) { isShutterFlashing = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
@@ -248,6 +452,14 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// Read from the capture queue on every frame, so it is kept as a plain
+    /// flag rather than reaching into published state.
+    private var isShowingVersion: Bool {
+        versionLock.lock()
+        defer { versionLock.unlock() }
+        return isVersioning
+    }
 
     private func setState(_ newState: State) {
         DispatchQueue.main.async { [weak self] in
@@ -273,6 +485,10 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        // A negative is on screen being re-filtered; the camera keeps running
+        // but its frames aren't what the viewer is showing.
+        if isShowingVersion { return }
 
         var image = CIImage(cvPixelBuffer: pixelBuffer).centerSquareCropped()
 
@@ -347,25 +563,9 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                 var xmp: String?
 
                 if isRAW {
-                    // Square the file itself first — that narrows its
-                    // default-crop rectangle without moving a pixel, and holds
-                    // in every converter. If iOS won't author the container,
-                    // the same rectangle travels in the XMP instead. Only ever
-                    // one of the two, or the frame would be cropped twice.
-                    let squared = RAWCropper.squareCropped(data)
-                    let cropInXMP = squared == nil ? RAWCropper.squareCropFractions(data) : nil
-                    let settings = CameraRawSidecar.xmp(for: profile, crop: cropInXMP)
-
-                    // Adobe keeps develop settings inside a DNG rather than
-                    // beside it, so embedding is what actually makes the look
-                    // travel. The sidecar is written either way as a fallback.
-                    let embedded = RAWCropper.embedding(settings, into: squared ?? data)
-                    negative = embedded ?? squared ?? data
-                    xmp = settings
-
-                    let status = NegativeStatus(croppedInFile: squared != nil,
-                                                settingsEmbedded: embedded != nil)
-                    await MainActor.run { self.negativeStatus = status }
+                    let prepared = self.prepareNegative(data, profile: profile)
+                    negative = prepared.data
+                    xmp = prepared.xmp
                 }
 
                 let shot = try self.store.add(imageData: jpeg,
