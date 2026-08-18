@@ -4,30 +4,31 @@
 //
 //  Exposure compensation, stacked beside the shutter.
 //
-//  This moves the camera's own exposure target bias, not a develop setting —
-//  it changes what the sensor records, so it is baked into the negative rather
-//  than applied to it afterwards.
+//  The same value the panel's Exposure slider moves — this is just the fast
+//  way to reach it, in whole stops.
 //
 
 import SwiftUI
 
 struct ExposureStepper: View {
 
-    @Binding var value: Int
-    var range: ClosedRange<Int>
+    @Binding var value: Float
+    var range: ClosedRange<Float>
 
     private var label: String {
-        switch value {
-        case 0:          return "0"
-        case let v where v > 0: return "+\(v)"
-        default:         return "\u{2212}\(abs(value))"
-        }
+        guard abs(value) >= 0.05 else { return "0" }
+        // Whole stops read as "+1"; anything the slider left in between keeps
+        // a decimal so the two controls never disagree about the value.
+        let rounded = (value * 10).rounded() / 10
+        return rounded == rounded.rounded()
+            ? String(format: "%+.0f", rounded)
+            : String(format: "%+.1f", rounded)
     }
 
     var body: some View {
         VStack(spacing: 4) {
             step("plus", enabled: value < range.upperBound) {
-                value = min(range.upperBound, value + 1)
+                value = min(range.upperBound, value.rounded(.down) + 1)
             }
 
             Text(label)
@@ -37,7 +38,7 @@ struct ExposureStepper: View {
                 .frame(minWidth: 26)
 
             step("minus", enabled: value > range.lowerBound) {
-                value = max(range.lowerBound, value - 1)
+                value = max(range.lowerBound, value.rounded(.up) - 1)
             }
         }
         .accessibilityElement(children: .combine)
@@ -61,6 +62,6 @@ struct ExposureStepper: View {
 #Preview {
     ZStack {
         Color.black.ignoresSafeArea()
-        ExposureStepper(value: .constant(-2), range: -8...8)
+        ExposureStepper(value: .constant(-2), range: -5...5)
     }
 }

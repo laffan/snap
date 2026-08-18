@@ -12,7 +12,7 @@
 //  saved file go through the exact same maths.
 //
 //  The adjustments that are *not* per-pixel — highlight/shadow recovery,
-//  clarity — stay as real filters around the LUT.
+//  exposure, clarity and sharpening — stay as real filters around the LUT.
 //
 
 import CoreImage
@@ -68,7 +68,15 @@ final class PositiveFilmFilter {
         // the border; we crop back to the original extent at the end.
         var output = image.clampedToExtent()
 
-        // 1. Highlight recovery and shadow lift, before anything steepens the
+        // 1. Exposure, first, so everything downstream sees the tones the
+        //    photograph is actually meant to have. A linear gain in the working
+        //    space, which is what a stop means.
+        if profile.exposure != 0 {
+            output = output.applyingFilter("CIExposureAdjust",
+                                           parameters: ["inputEV": profile.exposure])
+        }
+
+        // 2. Highlight recovery and shadow lift, before anything steepens the
         //    curve, so there is still headroom to recover.
         let highlightShadow = CIFilter.highlightShadowAdjust()
         highlightShadow.inputImage = output
@@ -76,19 +84,29 @@ final class PositiveFilmFilter {
         highlightShadow.shadowAmount = profile.shadowAmount
         output = highlightShadow.outputImage ?? output
 
-        // 2. Clarity: a wide, gentle unsharp mask reads as midtone local
-        //    contrast rather than as sharpening. The radius scales with the
-        //    image so preview and capture match.
+        // 3. Clarity and sharpening are the same operation at two scales: a
+        //    wide, gentle unsharp mask reads as midtone local contrast, a
+        //    narrow one reads as detail. Both radii scale with the image so
+        //    preview and capture match.
+        let shortEdge = Float(min(extent.width, extent.height))
+
         if profile.clarityIntensity > 0 {
-            let shortEdge = Float(min(extent.width, extent.height))
-            let unsharp = CIFilter.unsharpMask()
-            unsharp.inputImage = output
-            unsharp.radius = max(1, shortEdge * profile.clarityRadiusFraction)
-            unsharp.intensity = profile.clarityIntensity
-            output = unsharp.outputImage ?? output
+            let clarity = CIFilter.unsharpMask()
+            clarity.inputImage = output
+            clarity.radius = max(1, shortEdge * profile.clarityRadiusFraction)
+            clarity.intensity = profile.clarityIntensity
+            output = clarity.outputImage ?? output
         }
 
-        // 3. The grade itself.
+        if profile.sharpnessIntensity > 0 {
+            let sharpen = CIFilter.unsharpMask()
+            sharpen.inputImage = output
+            sharpen.radius = max(0.5, shortEdge * profile.sharpnessRadiusFraction)
+            sharpen.intensity = profile.sharpnessIntensity
+            output = sharpen.outputImage ?? output
+        }
+
+        // 4. The grade itself.
         let cube = CIFilter.colorCubeWithColorSpace()
         cube.inputImage = output
         cube.cubeDimension = Float(resolution.rawValue)

@@ -85,6 +85,8 @@ struct FilterPanel<Strip: View>: View {
 
     private var basic: some View {
         FilterSection(title: "Basic") {
+            SliderRow(label: "Exposure", value: $look.profile.exposure,
+                      range: -5...5, decimals: 2, onEditingChanged: editing)
             SliderRow(label: "Contrast", value: $look.profile.contrast,
                       onEditingChanged: editing)
             SliderRow(label: "Highlights", value: $look.profile.highlights,
@@ -95,6 +97,8 @@ struct FilterPanel<Strip: View>: View {
                       onEditingChanged: editing)
             SliderRow(label: "Clarity", value: $look.profile.clarity,
                       onEditingChanged: editing)
+            SliderRow(label: "Sharpness", value: $look.profile.sharpness,
+                      range: 0...100, onEditingChanged: editing)
             SliderRow(label: "Vibrance", value: $look.profile.vibrance,
                       onEditingChanged: editing)
         }

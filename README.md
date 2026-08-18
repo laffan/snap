@@ -135,10 +135,11 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-Below the frame sit **Filter** on the left and exposure compensation on the
-right, with the shutter centred between them. Exposure moves the camera's own
-target bias in whole stops, so it is recorded into the negative rather than
-applied to it afterwards.
+Below the frame sit **Filter** and **Camera** on the left, the shutter centred,
+and exposure on the right. Camera picks the lens; exposure steps in whole stops
+and is the same value as the panel's Exposure slider — one setting reachable
+two ways. It is a develop setting rather than a camera one, so it re-applies
+when a negative is re-filtered and travels to Lightroom as `crs:Exposure2012`.
 
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
 that returns to the live preview. Long-press for **Use Filter Data** (puts that
@@ -154,7 +155,8 @@ with use, and Delete is the way to reclaim it.
 The roll also lives inside the filter panel. Tapping a frame there loads its
 negative under the sliders in place of the live camera, and moving a slider
 regrades it as you go — the label under the frame reads VERSION while this is
-happening. Tapping the same frame again hands the viewer back to the camera.
+happening, and holding the frame peeks at the ungraded development the same way
+the saved-frame viewer does. Tapping the same frame again hands the viewer back to the camera.
 
 **Snap** becomes **Version** while a negative is loaded, and runs the same
 pipeline the shutter does — develop, crop, grade, encode, square the DNG,

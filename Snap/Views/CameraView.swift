@@ -102,6 +102,16 @@ struct CameraView: View {
                 ShotView(store: store, shot: viewing, edge: edge, showsRAW: $showsRAW)
             } else {
                 livePreview
+                    // Holding a negative that is under the sliders shows the
+                    // development with no look on it, the same way the
+                    // saved-frame viewer peeks.
+                    .onLongPressGesture(minimumDuration: 0.25, pressing: { pressing in
+                        if !pressing { camera.setPeekingSource(false) }
+                    }, perform: {
+                        guard camera.versionSource != nil else { return }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        camera.setPeekingSource(true)
+                    })
             }
 
             // A short black blink, the way a mechanical shutter reads.
@@ -130,7 +140,9 @@ struct CameraView: View {
     /// Names what the viewer is currently showing. Only meaningful while a
     /// saved frame is up — the live preview is neither.
     private var indicatorLabel: String {
-        if camera.versionSource != nil { return "VERSION" }
+        if camera.versionSource != nil {
+            return camera.isPeekingSource ? "RAW" : "VERSION"
+        }
         guard viewing != nil else { return "" }
         return showsRAW ? "RAW" : "JPEG"
     }
@@ -142,8 +154,8 @@ struct CameraView: View {
             Text(indicatorLabel)
                 .font(.system(size: 10, weight: .medium))
                 .tracking(1.1)
-                .foregroundStyle(.white.opacity(showsRAW || camera.versionSource != nil ? 0.85 : 0.35))
-                .animation(.easeOut(duration: 0.12), value: showsRAW)
+                .foregroundStyle(.white.opacity(showsRAW || camera.isPeekingSource ? 0.85 : 0.5))
+                .animation(.easeOut(duration: 0.12), value: indicatorLabel)
         }
         .padding(.trailing, 14)
         .padding(.top, 6)
@@ -170,29 +182,62 @@ struct CameraView: View {
                 ShutterButton(isBusy: camera.isCapturing) { camera.capture() }
             }
 
-            HStack {
-                Button {
-                    setEditing(true)
-                } label: {
-                    Text("Filter")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    textButton("Filter") { setEditing(true) }
+                    lensMenu
                 }
-                .buttonStyle(.plain)
 
                 Spacer()
 
-                if viewing == nil, camera.exposureBiasRange.lowerBound < camera.exposureBiasRange.upperBound {
-                    ExposureStepper(value: $camera.exposureBias,
-                                    range: camera.exposureBiasRange)
+                if viewing == nil {
+                    ExposureControl(look: camera.look)
                 }
             }
             .padding(.horizontal, 14)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Lens picker. Hidden on a single-camera device, where there is nothing
+    /// to choose.
+    @ViewBuilder
+    private var lensMenu: some View {
+        if camera.lenses.count > 1 {
+            Menu {
+                ForEach(camera.lenses) { lens in
+                    Button {
+                        camera.selectLens(lens)
+                    } label: {
+                        if lens == camera.currentLens {
+                            Label(lens.name, systemImage: "checkmark")
+                        } else {
+                            Text(lens.name)
+                        }
+                    }
+                }
+            } label: {
+                Text("Camera")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     @ViewBuilder
@@ -264,6 +309,17 @@ struct CameraView: View {
         } catch {
             camera.errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// Owns the binding to the look's exposure, so the stepper stays in step with
+/// the panel's slider and only this redraws when either moves.
+private struct ExposureControl: View {
+
+    @ObservedObject var look: LookModel
+
+    var body: some View {
+        ExposureStepper(value: $look.profile.exposure, range: -5...5)
     }
 }
 

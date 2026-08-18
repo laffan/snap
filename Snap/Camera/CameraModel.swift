@@ -70,18 +70,15 @@ final class CameraModel: NSObject, ObservableObject {
         var settingsEmbedded: Bool
     }
 
-    /// Exposure compensation in whole stops. This moves the camera's own
-    /// exposure target bias, so it is recorded into the negative rather than
-    /// applied to it afterwards.
-    @Published var exposureBias: Int = 0 {
-        didSet {
-            guard exposureBias != oldValue else { return }
-            applyExposureBias()
-        }
-    }
+    /// The lenses this device offers, and the one in use.
+    @Published private(set) var lenses: [Lens] = []
+    @Published private(set) var currentLens: Lens?
 
-    /// What the current camera will accept, in whole stops.
-    @Published private(set) var exposureBiasRange: ClosedRange<Int> = 0...0
+    struct Lens: Identifiable, Equatable {
+        var id: String { deviceType.rawValue }
+        var deviceType: AVCaptureDevice.DeviceType
+        var name: String
+    }
 
     /// A stored negative being re-filtered in place of the live camera.
     @Published private(set) var versionSource: Shot? = nil
@@ -91,6 +88,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// the RAW pipeline itself changes.
     private var developedSource: CIImage?
     private var developedBoost: Float?
+
+    /// True while the viewer is being held during a re-filter, which shows the
+    /// developed negative with no look on it.
+    @Published private(set) var isPeekingSource = false
     private var lookRevisionObserver: AnyCancellable?
 
     /// Mirrors `versionSource != nil` for the capture queue, which reads it on
@@ -101,6 +102,7 @@ final class CameraModel: NSObject, ObservableObject {
     private let developQueue = DispatchQueue(label: "com.snap.develop", qos: .userInitiated)
 
     private var videoDevice: AVCaptureDevice?
+    private var videoInput: AVCaptureDeviceInput?
 
     /// The Bayer format to ask for, resolved at configuration time.
     private var rawPixelFormat: OSType?
@@ -162,7 +164,7 @@ final class CameraModel: NSObject, ObservableObject {
                     // Only meaningful once the configuration is committed,
                     // which the `defer` in configureSession has just done.
                     self.resolveRAWSupport()
-                    self.resolveExposureRange()
+                    self.discoverLenses()
                     self.isConfigured = true
                 } catch {
                     self.setState(.failed(error.localizedDescription))
@@ -203,6 +205,7 @@ final class CameraModel: NSObject, ObservableObject {
         let input = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(input) else { throw SetupError.cannotAddInput }
         session.addInput(input)
+        videoInput = input
 
         guard session.canAddOutput(photoOutput) else { throw SetupError.cannotAddOutput }
         session.addOutput(photoOutput)
@@ -222,7 +225,12 @@ final class CameraModel: NSObject, ObservableObject {
         guard session.canAddOutput(videoOutput) else { throw SetupError.cannotAddOutput }
         session.addOutput(videoOutput)
 
-        // Snap is portrait-only, so both outputs are pinned upright.
+        applyRotation()
+    }
+
+    /// Snap is portrait-only, so both outputs are pinned upright. Re-applied
+    /// after a lens change, since swapping the input rebuilds the connections.
+    private func applyRotation() {
         for output in [videoOutput as AVCaptureOutput, photoOutput] {
             guard let connection = output.connection(with: .video) else { continue }
             if connection.isVideoRotationAngleSupported(90) {
@@ -231,28 +239,71 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    private func resolveExposureRange() {
-        guard let videoDevice else { return }
-        // Whole stops inside whatever the device actually allows.
-        let lower = Int(videoDevice.minExposureTargetBias.rounded(.up))
-        let upper = Int(videoDevice.maxExposureTargetBias.rounded(.down))
-        guard lower <= upper else { return }
+    // MARK: - Lenses
+
+    private static let lensNames: [AVCaptureDevice.DeviceType: String] = [
+        .builtInUltraWideCamera: "Ultra Wide",
+        .builtInWideAngleCamera: "Wide",
+        .builtInTelephotoCamera: "Telephoto",
+    ]
+
+    private func discoverLenses() {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: Array(CameraModel.lensNames.keys),
+            mediaType: .video,
+            position: .back
+        )
+
+        // Widest first, which is the order they sit on the phone.
+        let order: [AVCaptureDevice.DeviceType] = [
+            .builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera,
+        ]
+        let found = order.compactMap { type -> Lens? in
+            guard discovery.devices.contains(where: { $0.deviceType == type }),
+                  let name = CameraModel.lensNames[type] else { return nil }
+            return Lens(deviceType: type, name: name)
+        }
+
+        let active = videoDevice.flatMap { device in
+            found.first { $0.deviceType == device.deviceType }
+        }
         DispatchQueue.main.async { [weak self] in
-            self?.exposureBiasRange = lower...upper
+            self?.lenses = found
+            self?.currentLens = active
         }
     }
 
-    private func applyExposureBias() {
-        let bias = Float(exposureBias)
+    /// Swaps the session's input. RAW support is per-lens, so it is resolved
+    /// again afterwards rather than carried over.
+    func selectLens(_ lens: Lens) {
+        guard lens != currentLens else { return }
+
         sessionQueue.async { [weak self] in
-            guard let device = self?.videoDevice else { return }
+            guard let self,
+                  let device = AVCaptureDevice.default(lens.deviceType, for: .video, position: .back),
+                  let existing = self.videoInput else { return }
+
+            self.session.beginConfiguration()
+            self.session.removeInput(existing)
+
             do {
-                try device.lockForConfiguration()
-                device.setExposureTargetBias(bias)
-                device.unlockForConfiguration()
+                let input = try AVCaptureDeviceInput(device: device)
+                guard self.session.canAddInput(input) else { throw SetupError.cannotAddInput }
+                self.session.addInput(input)
+                self.videoInput = input
+                self.videoDevice = device
             } catch {
-                // Nothing actionable — the next adjustment will try again.
+                // Put the working lens back rather than leaving no input at all.
+                self.session.addInput(existing)
+                self.session.commitConfiguration()
+                return
             }
+
+            self.applyRotation()
+            self.session.commitConfiguration()
+
+            self.resolveRAWSupport()
+            self.discoverLenses()
         }
     }
 
@@ -321,8 +372,18 @@ final class CameraModel: NSObject, ObservableObject {
         versionSource = nil
         developedSource = nil
         developedBoost = nil
+        isPeekingSource = false
         setVersioning(false)
         renderer.clear()
+    }
+
+    /// The same peek the saved-frame viewer offers, for a negative under the
+    /// sliders: the ungraded development is already in hand, so showing it is
+    /// just a matter of pushing that to the renderer instead.
+    func setPeekingSource(_ peeking: Bool) {
+        guard versionSource != nil, peeking != isPeekingSource else { return }
+        isPeekingSource = peeking
+        refreshVersionPreview()
     }
 
     private func setVersioning(_ versioning: Bool) {
@@ -361,7 +422,7 @@ final class CameraModel: NSObject, ObservableObject {
             return
         }
 
-        renderer.setImage(look.filter.apply(to: developedSource))
+        renderer.setImage(isPeekingSource ? developedSource : look.filter.apply(to: developedSource))
     }
 
     /// Runs the capture pipeline over the selected negative instead of the

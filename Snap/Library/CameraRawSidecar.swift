@@ -44,13 +44,16 @@ enum CameraRawSidecar {
             "crs:HasSettings=\"True\"",
         ]
 
-        // Basic panel.
+        // Basic panel. Exposure is the one slider Lightroom keeps in stops
+        // rather than in its own −100...100 units.
         attributes += [
+            "crs:Exposure2012=\"\(String(format: "%+.2f", profile.exposure))\"",
             attribute("Contrast2012", profile.contrast),
             attribute("Highlights2012", profile.highlights),
             attribute("Shadows2012", profile.shadows),
             attribute("Blacks2012", profile.blacks),
             attribute("Clarity2012", profile.clarity),
+            attribute("Sharpness", profile.sharpness),
             attribute("Vibrance", profile.vibrance),
         ]
 

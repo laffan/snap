@@ -15,8 +15,16 @@ struct PositiveFilmProfile: Codable, Equatable {
 
     // MARK: - Basic
 
+    /// Exposure in stops, −5...5.
+    ///
+    /// A develop setting rather than a camera one, so it re-applies when a
+    /// stored negative is re-filtered and travels to Lightroom as
+    /// `crs:Exposure2012`. The stepper beside the shutter and the slider in the
+    /// panel move this same value.
+    var exposure: Float = 0
+
     /// Lightroom Contrast, −100...100.
-    var contrast: Float = 28
+    var contrast: Float = 25
 
     /// Lightroom Highlights, −100...100. Negative recovers bright areas.
     var highlights: Float = -20
@@ -30,19 +38,24 @@ struct PositiveFilmProfile: Codable, Equatable {
     var blacks: Float = -6
 
     /// Lightroom Clarity, −100...100. Midtone local contrast.
-    var clarity: Float = 22
+    var clarity: Float = 0
+
+    /// Sharpening, 0...100. Where clarity is a wide, low-amplitude unsharp
+    /// mask read as midtone local contrast, this is the narrow one read as
+    /// detail.
+    var sharpness: Float = 0
 
     /// Lightroom Vibrance, −100...100.
-    var vibrance: Float = 10
+    var vibrance: Float = 25
 
     // MARK: - Tone curve
 
     /// A gentle extra S on top of Contrast, on the same −100...100 scale.
-    var toneCurveS: Float = 10
+    var toneCurveS: Float = 50
 
     /// How far the bottom of the curve is lifted off the floor, in output
     /// units. This is the matte foot; 0 gives a true black.
-    var blackLift: Float = 0.034
+    var blackLift: Float = 0.086
 
     // MARK: - Colour mixer (HSL)
 
@@ -70,7 +83,7 @@ struct PositiveFilmProfile: Codable, Equatable {
         HSLBand(name: "Yellow",  center:  60, hue: -20, saturation: -30),
         HSLBand(name: "Green",   center: 120, hue: +35, saturation: -40),
         HSLBand(name: "Aqua",    center: 180, hue: +10, saturation: +10),
-        HSLBand(name: "Blue",    center: 240, hue: +10, saturation: +10),
+        HSLBand(name: "Blue",    center: 240, hue: +10, saturation: -15),
         HSLBand(name: "Purple",  center: 285, hue:   0, saturation: -50),
         HSLBand(name: "Magenta", center: 315, hue:   0, saturation: -50),
     ]
@@ -95,7 +108,7 @@ struct PositiveFilmProfile: Codable, Equatable {
     ///
     /// 0 is the most complete bypass and gives a linear response to the scene;
     /// 100 is Apple's own rendering. Only used on the RAW path.
-    var rawBoost: Float = 0
+    var rawBoost: Float = 10
 
     // MARK: - Slider → renderer conversions
 
@@ -140,6 +153,13 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// full-resolution capture look like the same photograph.
     var clarityRadiusFraction: Float { 0.018 }
 
+    /// `CIUnsharpMask.intensity` for the sharpening pass.
+    var sharpnessIntensity: Float { sharpness / 100 }
+
+    /// A much narrower radius than clarity's — detail rather than local
+    /// contrast — and relative for the same reason.
+    var sharpnessRadiusFraction: Float { 0.0012 }
+
     /// `CIRAWFilter.boostAmount`, 0...1.
     var rawBoostAmount: Float { rawBoost / 100 }
 }
@@ -156,7 +176,7 @@ struct PositiveFilmProfile: Codable, Equatable {
 extension PositiveFilmProfile {
 
     enum CodingKeys: String, CodingKey {
-        case contrast, highlights, shadows, blacks, clarity, vibrance
+        case exposure, contrast, highlights, shadows, blacks, clarity, sharpness, vibrance
         case toneCurveS, blackLift
         case bands
         case redPrimary, greenPrimary, bluePrimary
@@ -174,11 +194,13 @@ extension PositiveFilmProfile {
             ((try? container.decodeIfPresent(Float.self, forKey: key)) ?? nil) ?? fallback
         }
 
+        exposure   = float(.exposure, exposure)
         contrast   = float(.contrast, contrast)
         highlights = float(.highlights, highlights)
         shadows    = float(.shadows, shadows)
         blacks     = float(.blacks, blacks)
         clarity    = float(.clarity, clarity)
+        sharpness  = float(.sharpness, sharpness)
         vibrance   = float(.vibrance, vibrance)
         toneCurveS = float(.toneCurveS, toneCurveS)
         blackLift  = float(.blackLift, blackLift)
