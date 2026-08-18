@@ -27,7 +27,17 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var state: State = .starting
     @Published private(set) var isCapturing = false
     @Published private(set) var isShutterFlashing = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? = nil
+
+    /// Set when a `.preset` capture completes; drives the save sheet.
+    @Published var pendingSave: PendingSave? = nil
+
+    struct PendingSave: Identifiable {
+        let id = UUID()
+        var imageData: Data
+        var imageType: UTType
+        var profile: PositiveFilmProfile
+    }
 
     let renderer = PreviewRenderer()
 
@@ -40,9 +50,22 @@ final class CameraModel: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.snap.session")
     private let videoQueue = DispatchQueue(label: "com.snap.video", qos: .userInitiated)
 
-    /// Computed, not stored, so the lookup table is baked on first frame
-    /// (capture queue) rather than during `init` on the main thread.
-    private var look: PositiveFilmFilter { .standard }
+    /// Where the next frame is headed. A capture is only ever in flight one at
+    /// a time (`isCapturing` guards it), so a single slot is enough.
+    enum Destination {
+        /// Straight to the camera roll, as the shutter button does.
+        case cameraRoll
+        /// Handed back for a save sheet, together with the look that made it.
+        case preset
+    }
+
+    /// The live look. Owned here, observed by the filter panel.
+    let look = LookModel()
+
+    private var destination: Destination = .cameraRoll
+    /// The profile as it stood when the shutter fired, so later slider moves
+    /// can't change what gets written.
+    private var capturedProfile = PositiveFilmProfile()
     private let stillContext = CIContext(options: [.cacheIntermediates: false])
     private let library = PhotoLibrarySaver()
 
@@ -152,9 +175,11 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: - Capture
 
-    func capture() {
+    func capture(to destination: Destination = .cameraRoll) {
         guard state == .running, !isCapturing else { return }
         isCapturing = true
+        self.destination = destination
+        capturedProfile = look.profile
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
@@ -211,7 +236,7 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
-        renderer.setImage(look.apply(to: image))
+        renderer.setImage(look.filter.apply(to: image))
     }
 }
 
@@ -233,14 +258,26 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        // Same crop, same look, same order as the preview — just at full size.
-        let graded = look.apply(to: raw.centerSquareCropped())
+        // Same crop, same look, same order as the preview — just at full size,
+        // and always through a full-resolution LUT even if the preview was
+        // running on a draft one mid-drag.
+        let profile = capturedProfile
+        let graded = look.finalFilter(for: profile).apply(to: raw.centerSquareCropped())
+        let destination = self.destination
 
         Task { [weak self] in
             guard let self else { return }
             do {
                 let encoded = try self.encode(graded)
-                try await self.library.save(encoded.data, type: encoded.type)
+                switch destination {
+                case .cameraRoll:
+                    try await self.library.save(encoded.data, type: encoded.type)
+                case .preset:
+                    let pending = PendingSave(imageData: encoded.data,
+                                              imageType: encoded.type,
+                                              profile: profile)
+                    await MainActor.run { self.pendingSave = pending }
+                }
                 self.finishCapture(error: nil)
             } catch {
                 self.finishCapture(error: error.localizedDescription)

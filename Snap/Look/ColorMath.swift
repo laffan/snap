@@ -118,6 +118,21 @@ func liftBlacks(_ c: RGB, by lift: Float) -> RGB {
     RGB(repeating: lift) + c * (1 - lift)
 }
 
+/// Moves the black point without disturbing the midtones: full effect at the
+/// floor, faded out by roughly 35% grey. Negative crushes, positive opens.
+@inline(__always)
+func shiftBlacks(_ x: Float, by amount: Float) -> Float {
+    x + amount * (1 - smoothstep(0, 0.35, x))
+}
+
+@inline(__always)
+func shiftBlacks(_ c: RGB, by amount: Float) -> RGB {
+    guard amount != 0 else { return c }
+    return RGB(shiftBlacks(c.x, by: amount),
+               shiftBlacks(c.y, by: amount),
+               shiftBlacks(c.z, by: amount))
+}
+
 /// Saturation boost that backs off on colours that are already saturated, so
 /// skin tones and skies gain life without the reds going neon.
 @inline(__always)

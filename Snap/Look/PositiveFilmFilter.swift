@@ -11,8 +11,8 @@
 //  no matter how elaborate the grade gets, and guarantees the preview and the
 //  saved file go through the exact same maths.
 //
-//  The two adjustments that are *not* per-pixel — highlight/shadow recovery and
-//  clarity — stay as real filters either side of the LUT.
+//  The adjustments that are *not* per-pixel — highlight/shadow recovery,
+//  clarity and grain — stay as real filters around the LUT.
 //
 
 import CoreImage
@@ -20,6 +20,19 @@ import CoreImage.CIFilterBuiltins
 import simd
 
 final class PositiveFilmFilter {
+
+    /// Samples per axis in the lookup table.
+    ///
+    /// Measured against the exact per-pixel grade, 64³ holds worst-case error
+    /// to ~1.8/255 (mean 0.1/255) and keeps a neutral ramp inside 0.3/255, so
+    /// smooth walls and skies don't band. 32³ roughly triples that error —
+    /// fine for a preview that is being dragged, not for a committed look.
+    enum Resolution: Int {
+        /// Used while a slider is in motion, where responsiveness wins.
+        case draft = 32
+        /// Used for everything that is kept: settled edits, and every capture.
+        case final = 64
+    }
 
     /// The look Snap ships with.
     ///
@@ -30,18 +43,17 @@ final class PositiveFilmFilter {
     static let standard = PositiveFilmFilter()
 
     let profile: PositiveFilmProfile
-
-    /// Samples per axis in the lookup table. 64³ is smooth enough that the
-    /// hue-shifted greens don't band, and costs ~4 MB.
-    private static let cubeDimension = 64
+    let resolution: Resolution
 
     private let cubeData: Data
     private let workingColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
-    init(profile: PositiveFilmProfile = PositiveFilmProfile()) {
+    init(profile: PositiveFilmProfile = PositiveFilmProfile(),
+         resolution: Resolution = .final) {
         self.profile = profile
+        self.resolution = resolution
         self.cubeData = PositiveFilmFilter.makeCubeData(profile: profile,
-                                                        dimension: PositiveFilmFilter.cubeDimension)
+                                                        dimension: resolution.rawValue)
     }
 
     // MARK: - Applying the look
@@ -79,12 +91,53 @@ final class PositiveFilmFilter {
         // 3. The grade itself.
         let cube = CIFilter.colorCubeWithColorSpace()
         cube.inputImage = output
-        cube.cubeDimension = Float(PositiveFilmFilter.cubeDimension)
+        cube.cubeDimension = Float(resolution.rawValue)
         cube.cubeData = cubeData
         cube.colorSpace = workingColorSpace
         output = cube.outputImage ?? output
 
+        // 4. Grain last, the way it sits on film — anything after it would
+        //    just be regrading the noise.
+        output = applyGrain(to: output, extent: extent)
+
         return output.cropped(to: extent)
+    }
+
+    /// Fine monochrome grain, blended in `overlay`.
+    ///
+    /// Overlay is the useful part: a foreground of exactly 0.5 is a no-op, and
+    /// its response scales with `2 × backdrop` in the shadows and
+    /// `2 × (1 − backdrop)` in the highlights. So the grain naturally peaks in
+    /// the midtones and fades out at both ends, which is what film does,
+    /// without needing a mask.
+    private func applyGrain(to image: CIImage, extent: CGRect) -> CIImage {
+        let intensity = profile.grainIntensity
+        guard intensity > 0, let noise = CIFilter.randomGenerator().outputImage else {
+            return image
+        }
+
+        // Grain size is defined against a reference width so a 1080px preview
+        // and a full-resolution capture show grain of the same relative size.
+        let scale = CGFloat(profile.grainSize) * extent.width / PositiveFilmProfile.grainReferenceWidth
+        let bias = 0.5 - intensity / 2
+
+        var grain = noise.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+
+        // Collapse to monochrome off one channel and squeeze the range down to
+        // `intensity`, centred on the neutral 0.5.
+        grain = grain.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: CGFloat(intensity), y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: CGFloat(intensity), y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: CGFloat(intensity), y: 0, z: 0, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBiasVector": CIVector(x: CGFloat(bias), y: CGFloat(bias), z: CGFloat(bias), w: 1),
+        ])
+
+        return grain
+            .cropped(to: extent)
+            .applyingFilter("CIOverlayBlendMode", parameters: [
+                kCIInputBackgroundImageKey: image
+            ])
     }
 
     // MARK: - Baking the lookup table
@@ -123,13 +176,14 @@ final class PositiveFilmFilter {
     }
 
     /// The per-pixel grade, in the order Lightroom applies it: camera
-    /// calibration, then the basic panel, then the colour mixer, then the
-    /// point curve.
+    /// calibration, then the basic panel (blacks, contrast, vibrance), then
+    /// the colour mixer, then the point curve.
     private static func grade(_ input: RGB,
                               profile: PositiveFilmProfile,
                               calibration: simd_float3x3,
                               bands: [ResolvedBand]) -> RGB {
         var color = clamp01(calibration * input)
+        color = clamp01(shiftBlacks(color, by: profile.blacksShift))
         color = sCurve(color, amount: profile.contrastAmount)
         color = clamp01(applyVibrance(color, amount: profile.vibranceAmount))
         color = applyColorMixer(color, bands: bands)

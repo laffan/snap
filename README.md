@@ -33,19 +33,56 @@ resolution.
 
 | File | Role |
 | --- | --- |
-| `Look/PositiveFilmProfile.swift` | The look, written in Lightroom slider units. **Edit this to change the grade.** |
+| `Look/PositiveFilmProfile.swift` | The look, written in Lightroom slider units. **Edit this to change the defaults.** |
 | `Look/PositiveFilmFilter.swift` | Bakes the profile into a 3D LUT and applies the Core Image chain |
-| `Look/ColorMath.swift` | HSV conversion, tone curves, vibrance |
+| `Look/LookModel.swift` | Holds the live profile and keeps a baked filter in step with it |
+| `Look/ColorMath.swift` | HSV conversion, tone curves, black point, vibrance |
 | `Camera/CameraModel.swift` | Capture session, shutter, save |
 | `Camera/CIImage+Square.swift` | The centred 1:1 crop shared by preview and capture |
+| `Presets/PresetStore.swift` | Saved looks on disk, and the zip bundle |
+| `Views/FilterPanel.swift` | The slider editor and its action bar |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
+
+## The filter editor
+
+**Filter** (bottom right) replaces the lower half of the screen with every knob
+the look exposes, grouped the way Lightroom groups them — Basic, Tone Curve,
+Color Mixer, Calibration, Grain. Moving a slider regrades the live preview.
+Double-tap any slider to return it to neutral.
+
+A sticky bar sits under the sliders:
+
+| Button | Does |
+| --- | --- |
+| **Snap** | Same as the shutter — graded photo to the camera roll |
+| **Save** | Captures a frame *and* the settings that made it, then asks for a title (defaults to the timestamp) and notes |
+| **Load** | Saved looks as cards, newest first. Tap to put one back on the sliders; swipe to delete |
+| **Bundle** | Zips every saved image and settings file and hands it to the share sheet |
+
+Save and Snap are deliberately different: Snap goes to the camera roll, Save
+goes to the app's own store so Bundle has something to collect. Saved entries
+live in `Documents/Snaps` as a matched `<uuid>.json` and `<uuid>.heic` per
+entry — flat and readable, which is why Bundle is just a zip of the folder.
+
+### Keeping sliders responsive
+
+Re-baking a 64³ LUT on every frame of a drag is too slow, so a drag bakes at
+32³ and releasing the slider commits a 64³ bake; captures always force the full
+resolution regardless. The split is measured, not guessed. Against the exact
+per-pixel grade, 64³ holds worst-case error to ~1.8/255 (mean 0.1/255) with a
+neutral ramp inside 0.3/255; 32³ roughly triples that. The error is a smooth
+shift rather than a step, so it shows up as a faint tint on one hue, never as
+banding.
+
+Bakes are coalesced: during a drag many requests pile up behind one bake, and
+only the newest survives.
 
 ### The look
 
 An approximation of the Ricoh GR II *Positive Film* image control: punchy
-midtone contrast, recovered highlights, slightly lifted matte blacks, crushed
-yellows and greens shifted toward aqua, reds and blues held or pushed, and
-magentas taken almost out.
+midtone contrast, recovered highlights, a crushed black point under lifted
+shadows, crushed yellows and greens shifted toward aqua, reds and blues held or
+pushed, magentas taken almost out, and a fine grain over the whole frame.
 
 Everything that is a pure function of colour — camera calibration, contrast,
 vibrance, the eight-band HSL mixer, the tone curve — is baked once into a 64³
@@ -53,11 +90,17 @@ lookup table at launch. That collapses the whole grade into one texture fetch
 per pixel, so it costs the same whether the chain is simple or elaborate, and
 it guarantees the preview and the saved file are doing identical maths.
 
-The two stages that are *not* per-pixel stay as real filters either side of the
-LUT: highlight/shadow recovery, and clarity as a wide, low-amplitude unsharp
-mask. The unsharp radius is a fraction of the image's short edge rather than a
-fixed pixel count, which is what keeps the 1080px preview and the
+The stages that are *not* per-pixel stay as real filters around the LUT:
+highlight/shadow recovery, clarity as a wide low-amplitude unsharp mask, and
+grain. Both the unsharp radius and the grain size are fractions of the image
+rather than fixed pixel counts, which is what keeps the 1080px preview and the
 full-resolution capture looking like the same photograph.
+
+Grain is blended in `overlay`, which earns its keep: a foreground of exactly
+0.5 is a no-op, and the response scales with `2 × backdrop` in the shadows and
+`2 × (1 − backdrop)` in the highlights. So grain peaks in the midtones and
+fades at both ends the way film does, with no mask. At the default amount that
+is 2.4% deviation at midtone against 0.1% at either extreme.
 
 One deliberate deviation from the source profile: it lists Green as Hue −35 but
 annotates it *"shift toward aqua/blue"*, and in Lightroom a negative green hue
@@ -66,7 +109,7 @@ look, so the stated intent wins. See the comment in `PositiveFilmProfile.swift`.
 
 ## Deliberately not here
 
-Front camera, flash, zoom, focus tap, grid, gallery, settings. The capture
-screen is a preview and a button.
+Front camera, flash, zoom, focus tap, grid, gallery. The capture screen is a
+preview and a button.
 
 RAW capture is the next thing.

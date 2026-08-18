@@ -14,6 +14,14 @@ struct ShutterButton: View {
 
     @State private var isPressed = false
 
+    // A `private` stored property makes the synthesized memberwise initializer
+    // private too, which would put this out of reach of CameraView. Spelled out
+    // so it stays callable.
+    init(isBusy: Bool, action: @escaping () -> Void) {
+        self.isBusy = isBusy
+        self.action = action
+    }
+
     private let outerDiameter: CGFloat = 74
     private let ringWidth: CGFloat = 3
     private let inset: CGFloat = 6
