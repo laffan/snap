@@ -51,12 +51,13 @@ enum RAWDeveloper {
         }
 
         // Everything Apple would otherwise do to make a JPEG look good.
-        filter.noiseReductionAmount = 0
-        filter.colorNoiseReductionAmount = 0
+        //
+        // The two amounts below are the whole noise-reduction surface the
+        // CIRAWFilter class exposes. The finer-grained noiseReduction* knobs
+        // belong to the older CIFilter(imageData:options:) key-based API and
+        // have no equivalent here.
         filter.luminanceNoiseReductionAmount = 0
-        filter.noiseReductionDetailAmount = 0
-        filter.noiseReductionContrastAmount = 0
-        filter.noiseReductionSharpnessAmount = 0
+        filter.colorNoiseReductionAmount = 0
         filter.sharpnessAmount = 0
         filter.detailAmount = 0
         filter.contrastAmount = 0
