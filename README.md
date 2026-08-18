@@ -14,8 +14,13 @@ what gets saved.
 ## Running it
 
 Open `Snap.xcodeproj`, set your own team under **Signing & Capabilities**,
-change `PRODUCT_BUNDLE_IDENTIFIER` from `com.example.Snap` to something you
-own, and run.
+and run.
+
+The bundle identifier is `com.laffan.snapsquarecamera`. Apple requires it to
+be globally unique, so if it ever collides with something already registered,
+change `PRODUCT_BUNDLE_IDENTIFIER` in both the Debug and Release
+configurations. Anything under a reverse-DNS prefix you control works;
+`com.example.*` does not, as Apple will not register it to anyone.
 
 ## How it works
 
