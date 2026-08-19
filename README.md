@@ -153,6 +153,17 @@ a second pins focus and exposure to that point and marks it with a yellow ring;
 any tap lets them go again. Switching lens releases the point too, since it
 means nothing on another lens.
 
+A monochrome frame stays monochrome. Loading one for re-filtering switches
+B&W on and locks it: the colour it was rendered without isn't in the JPEG, and
+re-filtering it back to colour would quietly produce a different photograph
+from the one that was taken. Exporting the DNG still gets you the colour.
+Ending the session only puts B&W back the way it was if loading the negative
+is what turned it on.
+
+Preview frames have no negative, so they can't be re-filtered — they show
+dimmed in the panel's roll and don't respond to a tap. Their menu still works;
+they can be shared, deleted, or have their settings borrowed.
+
 **PS** beside the shutter saves the preview frame itself, skipping the RAW loop
 entirely — no sensor round trip, no demosaic, no full-resolution grade, since
 the graded frame is already on screen. It is as close to zero shutter lag as

@@ -16,6 +16,8 @@ struct FilterPanel<Strip: View>: View {
     var isBusy: Bool
     var isRAWAvailable: Bool
     var negativeStatus: CameraModel.NegativeStatus?
+    /// True when the loaded negative was shot monochrome, which it stays.
+    var isMonochromeLocked: Bool
     /// "Snap" for a live capture, "Version" when a stored negative is loaded.
     var primaryTitle: String
     var onSnap: () -> Void
@@ -108,7 +110,12 @@ struct FilterPanel<Strip: View>: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
             .tint(Color.snapAccent)
+            .disabled(isMonochromeLocked)
             .padding(.top, 2)
+
+            if isMonochromeLocked {
+                note("This frame was shot in black and white and stays that way. The colour is still in its DNG if you export it.")
+            }
         }
     }
 

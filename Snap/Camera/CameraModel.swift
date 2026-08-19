@@ -83,6 +83,18 @@ final class CameraModel: NSObject, ObservableObject {
     /// A stored negative being re-filtered in place of the live camera.
     @Published private(set) var versionSource: Shot? = nil
 
+    /// True while the loaded negative was shot in black and white.
+    ///
+    /// A monochrome frame stays monochrome: the colour it was rendered without
+    /// isn't recoverable from the JPEG, and re-filtering it back to colour
+    /// would quietly produce a different photograph from the one that was
+    /// taken. The colour is still in the DNG for anyone who exports it.
+    var isMonochromeLocked: Bool { versionSource?.profile.blackAndWhite == true }
+
+    /// Set when loading a negative turned monochrome on, so ending the session
+    /// can put it back rather than leaving the camera in a mode nobody chose.
+    private var forcedMonochrome = false
+
     /// The source developed once at preview size. Re-grading it is cheap;
     /// re-developing it is not, so it is only redone when a setting that feeds
     /// the RAW pipeline itself changes.
@@ -448,11 +460,23 @@ final class CameraModel: NSObject, ObservableObject {
     func beginVersioning(from shot: Shot) {
         guard let rawURL = store.rawURL(for: shot) else { return }
         versionSource = shot
+
+        if shot.profile.blackAndWhite, !look.profile.blackAndWhite {
+            forcedMonochrome = true
+            look.profile.blackAndWhite = true
+        }
+
         setVersioning(true)
         developSource(at: rawURL)
     }
 
     func endVersioning() {
+        // Only undo what loading the negative turned on; a mode the user
+        // chose while it was open is theirs to keep.
+        if forcedMonochrome {
+            look.profile.blackAndWhite = false
+            forcedMonochrome = false
+        }
         versionSource = nil
         developedSource = nil
         developedBoost = nil
@@ -507,7 +531,7 @@ final class CameraModel: NSObject, ObservableObject {
         }
 
         if isPeekingSource {
-            renderer.setImage(look.profile.blackAndWhite
+            renderer.setImage(look.profile.blackAndWhite || isMonochromeLocked
                               ? RAWDeveloper.desaturated(developedSource)
                               : developedSource)
         } else {
@@ -527,7 +551,8 @@ final class CameraModel: NSObject, ObservableObject {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
 
-        let profile = look.profile
+        var profile = look.profile
+        if shot.profile.blackAndWhite { profile.blackAndWhite = true }
         let wantsTitle = titled
 
         Task { [weak self] in

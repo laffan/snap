@@ -58,15 +58,42 @@ struct FilterSection<Content: View>: View {
     let title: String
     @ViewBuilder var content: Content
 
+    /// Collapsed to begin with. There are more than forty knobs in here; all
+    /// of them open at once is a wall rather than a panel.
+    @State private var isExpanded = false
+
+    // Explicit because the private state above would otherwise make the
+    // memberwise initializer private, putting this out of reach of FilterPanel.
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.2)
-                .foregroundStyle(.white.opacity(0.4))
-                .padding(.top, 4)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(title.uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(1.2)
 
-            content
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+
+                    Spacer()
+                }
+                .foregroundStyle(.white.opacity(isExpanded ? 0.6 : 0.4))
+                .padding(.top, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                content
+            }
         }
     }
 }

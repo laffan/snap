@@ -17,6 +17,9 @@ struct FilmStrip: View {
     var onUseLook: (Shot) -> Void
     var onShare: ([URL]) -> Void
     var onDelete: (Shot) -> Void
+    /// True in the filter panel, where a shot with no negative has nothing to
+    /// re-filter and is shown as unavailable.
+    var requiresNegative: Bool
 
     /// Thumbnails are decoded and held in memory, so the strip only reaches
     /// for a page at a time.
@@ -34,13 +37,15 @@ struct FilmStrip: View {
          onSelect: @escaping (Shot) -> Void,
          onUseLook: @escaping (Shot) -> Void,
          onShare: @escaping ([URL]) -> Void,
-         onDelete: @escaping (Shot) -> Void) {
+         onDelete: @escaping (Shot) -> Void,
+         requiresNegative: Bool) {
         self.store = store
         self.selection = selection
         self.onSelect = onSelect
         self.onUseLook = onUseLook
         self.onShare = onShare
         self.onDelete = onDelete
+        self.requiresNegative = requiresNegative
     }
 
     private var visible: [Shot] {
@@ -51,11 +56,16 @@ struct FilmStrip: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(visible) { shot in
+                    let isUsable = !requiresNegative || store.rawURL(for: shot) != nil
+
                     Thumbnail(store: store,
                               shot: shot,
                               edge: thumbnailEdge,
                               isSelected: shot.id == selection?.id)
-                        .onTapGesture { onSelect(shot) }
+                        .opacity(isUsable ? 1 : 0.3)
+                        // The menu still applies — a preview frame can still be
+                        // shared, deleted, or have its settings borrowed.
+                        .onTapGesture { if isUsable { onSelect(shot) } }
                         .contextMenu {
                             Button {
                                 onUseLook(shot)

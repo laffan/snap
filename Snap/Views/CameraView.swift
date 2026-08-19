@@ -41,13 +41,16 @@ struct CameraView: View {
                                 isBusy: camera.isCapturing,
                                 isRAWAvailable: camera.isRAWAvailable,
                                 negativeStatus: camera.negativeStatus,
+                                isMonochromeLocked: camera.isMonochromeLocked,
                                 primaryTitle: camera.versionSource == nil ? "Snap" : "Version",
                                 onSnap: { primaryAction(titled: false) },
                                 onSave: { primaryAction(titled: true) },
                                 onLoad: { isLoadingLook = true },
                                 onBundle: makeBundle,
                                 onClose: { setEditing(false) }) {
-                        roll(selection: camera.versionSource, onSelect: selectForVersion)
+                        roll(selection: camera.versionSource,
+                             requiresNegative: true,
+                             onSelect: selectForVersion)
                     }
                 } else {
                     Spacer(minLength: 0)
@@ -195,13 +198,16 @@ struct CameraView: View {
         .opacity(indicatorLabel.isEmpty ? 0 : 1)
     }
 
-    private func roll(selection: Shot?, onSelect: @escaping (Shot) -> Void) -> some View {
+    private func roll(selection: Shot?,
+                      requiresNegative: Bool = false,
+                      onSelect: @escaping (Shot) -> Void) -> some View {
         FilmStrip(store: store,
                   selection: selection,
                   onSelect: onSelect,
                   onUseLook: useLook,
                   onShare: { share = ShareItem($0) },
-                  onDelete: delete)
+                  onDelete: delete,
+                  requiresNegative: requiresNegative)
     }
 
     // MARK: - Controls
@@ -235,7 +241,7 @@ struct CameraView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     textButton("Filter") { setEditing(true) }
                     lensPicker
-                    MonochromeToggle(look: camera.look)
+                    MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
                 }
 
                 Spacer()
@@ -416,6 +422,7 @@ private struct ThirdsGrid: View {
 private struct MonochromeToggle: View {
 
     @ObservedObject var look: LookModel
+    var isLocked: Bool
 
     var body: some View {
         Button {
@@ -429,6 +436,7 @@ private struct MonochromeToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isLocked)
         .animation(.easeOut(duration: 0.12), value: look.profile.blackAndWhite)
         .accessibilityLabel("Black and white")
         .accessibilityValue(look.profile.blackAndWhite ? "on" : "off")
