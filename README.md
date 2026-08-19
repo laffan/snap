@@ -171,6 +171,30 @@ offered stops are trimmed to what the active lens and format actually accept.
 ISO also has a readout under the exposure stepper, with AUTO at the top of its
 list; it and the M row edit the same value.
 
+### The meter, and what the preview can't tell you
+
+Exposure itself needs no simulating. There is one session and one device input,
+and `setExposureModeCustom` is set on the *device*, so the preview stream and
+the still are exposed identically — choosing a fast shutter at low ISO in dim
+light darkens the preview by exactly the amount it darkens the photograph.
+
+Two things still differ, and neither can be previewed away. The preview is a
+binned frame that has been through Apple's video noise reduction, while the
+still is full-resolution RAW with every noise-reduction knob at zero — so a
+high-ISO frame will be grainier than the preview promises. And the still is
+one exposure where the preview is a stream, so a slow shutter's blur only
+partly shows.
+
+Rather than guess at those, Snap does what a camera does and meters. The EV
+readout under the frame is `exposureTargetOffset`: how far the chosen settings
+sit from what the meter wants, in stops, negative for under. It appears only
+when the exposure is being driven by hand, since auto holds it at zero. Past
+half a stop it brightens; past a stop and a half it turns yellow.
+
+Video HDR is switched off for the same reason. Left on, the video stream gets
+local tone mapping the still explicitly does not, so the preview would show
+recovered highlights and lifted shadows the negative never had.
+
 Holding to focus moves focus only. Choosing what is sharp and choosing what is
 bright are separate decisions, and the exposure controls own the second.
 

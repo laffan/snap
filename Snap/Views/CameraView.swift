@@ -190,9 +190,32 @@ struct CameraView: View {
         return showsRAW ? "RAW" : "JPEG"
     }
 
+    /// How far the chosen exposure sits from what the meter wants, in stops.
+    ///
+    /// Shown only when the exposure is being driven by hand — in auto the
+    /// camera holds this at zero, so it would be a permanent zero teaching
+    /// nothing. This is the honest way to answer "am I about to underexpose
+    /// this": the preview can't show noise the sensor hasn't produced yet, but
+    /// the meter knows exactly how far off the settings are.
+    @ViewBuilder
+    private var exposureMeter: some View {
+        if viewing == nil, camera.exposureMode != .auto {
+            let offset = camera.exposureOffset
+            let magnitude = abs(offset)
+
+            Text(magnitude < 0.05 ? "0.0 EV" : String(format: "%+.1f EV", offset))
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(magnitude >= 1.5 ? Color.snapAccent
+                                 : .white.opacity(magnitude >= 0.5 ? 0.8 : 0.45))
+                .animation(.easeOut(duration: 0.15), value: magnitude >= 1.5)
+        }
+    }
+
     @ViewBuilder
     private var sourceIndicator: some View {
         HStack {
+            exposureMeter
             Spacer()
             Text(indicatorLabel)
                 .font(.system(size: 10, weight: .medium))
@@ -200,10 +223,9 @@ struct CameraView: View {
                 .foregroundStyle(.white.opacity(showsRAW || camera.isPeekingSource ? 0.85 : 0.5))
                 .animation(.easeOut(duration: 0.12), value: indicatorLabel)
         }
-        .padding(.trailing, 14)
+        .padding(.horizontal, 14)
         .padding(.top, 6)
         .frame(height: 18)
-        .opacity(indicatorLabel.isEmpty ? 0 : 1)
     }
 
     private func roll(selection: Shot?,

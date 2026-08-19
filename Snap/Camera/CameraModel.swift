@@ -148,7 +148,11 @@ final class CameraModel: NSObject, ObservableObject {
     /// ExposureSettings.
     @Published private(set) var aperture: Float?
 
-    private var isoTracker: AnyCancellable?
+    /// How far the current exposure sits from the meter's target, in stops.
+    /// Negative is under.
+    @Published private(set) var exposureOffset: Float = 0
+
+    private var meterObserver: AnyCancellable?
 
     /// The portrait frame size as delivered, needed to turn a point on screen
     /// into one the device understands. Written on the capture queue.
@@ -220,6 +224,8 @@ final class CameraModel: NSObject, ObservableObject {
                     self.resolveRAWSupport()
                     self.discoverLenses()
                     self.resolveExposureCapabilities()
+                    self.disableVideoHDR()
+                    DispatchQueue.main.async { self.startMetering() }
                     self.isConfigured = true
                 } catch {
                     self.setState(.failed(error.localizedDescription))
@@ -302,6 +308,24 @@ final class CameraModel: NSObject, ObservableObject {
         .builtInTelephotoCamera: "Telephoto",
     ]
 
+    /// Turns off the video pipeline's HDR.
+    ///
+    /// The preview and the still come off the same sensor, so exposure already
+    /// matches — but the video stream gets Apple's local tone mapping, while
+    /// the still has `localToneMapAmount` at zero. Left on, the preview shows
+    /// recovered highlights and lifted shadows the negative will not have.
+    private func disableVideoHDR() {
+        guard let device = videoDevice, device.activeFormat.isVideoHDRSupported else { return }
+        do {
+            try device.lockForConfiguration()
+            // Has to stop adjusting itself before the value will hold.
+            device.automaticallyAdjustsVideoHDREnabled = false
+            device.isVideoHDREnabled = false
+            device.unlockForConfiguration()
+        } catch {
+        }
+    }
+
     /// Reads what this lens and format will accept.
     private func resolveExposureCapabilities() {
         guard let device = videoDevice else { return }
@@ -326,7 +350,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// iOS has no shutter-priority mode of its own: `setExposureModeCustom`
     /// fixes both the shutter and the ISO. So priority is built on top of it —
     /// the shutter is pinned and ISO is nudged to follow the meter, which is
-    /// what `startTrackingISO` does. Manual pins both and lets the meter drift.
+    /// what `startMetering` does. Manual pins both and lets the meter drift.
     private func applyExposure() {
         let mode = exposureMode
         let speed = shutterSpeed
@@ -341,15 +365,12 @@ final class CameraModel: NSObject, ObservableObject {
 
                 switch mode {
                 case .auto:
-                    self.stopTrackingISO()
                     if device.isExposureModeSupported(.continuousAutoExposure) {
                         device.exposureMode = .continuousAutoExposure
                     }
 
                 case .shutter, .manual:
                     guard device.isExposureModeSupported(.custom) else { return }
-                    // Manual holds its own ISO; nothing should be moving it.
-                    if mode == .manual { self.stopTrackingISO() }
 
                     let duration = speed?.duration ?? AVCaptureDevice.currentExposureDuration
                     let isoValue = chosenISO.map {
@@ -361,32 +382,31 @@ final class CameraModel: NSObject, ObservableObject {
             } catch {
                 return
             }
-
-            if mode == .shutter {
-                DispatchQueue.main.async { self.startTrackingISO() }
-            }
         }
     }
 
-    /// Shutter priority's other half: with the shutter pinned, ISO is the only
-    /// thing left to balance the frame, so the meter's own error term drives
-    /// it. `exposureTargetOffset` is in stops, which is exactly the units ISO
-    /// scales in.
-    private func startTrackingISO() {
-        // Always rebuilt rather than kept: after a lens swap the old
-        // subscription is watching a device that is no longer running.
-        isoTracker = nil
+    /// One subscription to the meter, serving both readers.
+    ///
+    /// `exposureTargetOffset` is how far the current exposure sits from what
+    /// the meter wants, in stops. That is the number a photographer needs when
+    /// driving the exposure by hand, and it is also what shutter priority
+    /// corrects against — ISO scales in the same units, so the correction is a
+    /// single multiply. Keeping it as one always-on subscription means there is
+    /// no tracker lifecycle to get wrong when the mode or the lens changes.
+    private func startMetering() {
+        // Rebuilt rather than kept: after a lens swap the old subscription is
+        // watching a device that is no longer running.
+        meterObserver = nil
         guard let device = videoDevice else { return }
 
-        isoTracker = device.publisher(for: \.exposureTargetOffset)
-            .throttle(for: .milliseconds(300), scheduler: DispatchQueue.main, latest: true)
+        meterObserver = device.publisher(for: \.exposureTargetOffset)
+            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] offset in
-                self?.correctISO(by: offset)
+                guard let self else { return }
+                self.exposureOffset = offset
+                // Manual holds its own ISO; nothing should be moving it.
+                if self.exposureMode == .shutter { self.correctISO(by: offset) }
             }
-    }
-
-    private func stopTrackingISO() {
-        DispatchQueue.main.async { [weak self] in self?.isoTracker = nil }
     }
 
     private func correctISO(by offset: Float) {
@@ -471,8 +491,10 @@ final class CameraModel: NSObject, ObservableObject {
             self.resolveRAWSupport()
             self.discoverLenses()
             self.resolveExposureCapabilities()
+            self.disableVideoHDR()
             DispatchQueue.main.async {
                 self.releaseFocus()
+                self.startMetering()
                 self.applyExposure()
             }
         }
