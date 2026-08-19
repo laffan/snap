@@ -148,9 +148,35 @@ that returns to the live preview. Long-press for **Use Filter Data** (puts that
 shot's settings back on the sliders), **Share JPEG**, **Share RAW** (only when
 the capture was RAW), or **Delete Image**.
 
+## Exposure
+
+Two of the three classic modes mean something on a phone. An iPhone lens has a
+fixed iris — `AVCaptureDevice.lensAperture` is read-only because there is
+nothing to move — so aperture priority would be indistinguishable from auto.
+The f-number is shown where that button would be, as a readout rather than a
+control.
+
+**S** pins the shutter and lets ISO follow. iOS has no shutter-priority mode of
+its own: `setExposureModeCustom(duration:iso:)` fixes both. So priority is
+built on top of it — the shutter is held and ISO is nudged toward the meter,
+using `exposureTargetOffset`, which reports its error in stops, exactly the
+units ISO scales in.
+
+**M** pins both and lets the meter drift. Selecting it borrows whatever ISO the
+camera had arrived at rather than jumping to an arbitrary number.
+
+Tapping the lit mode returns to auto. The rows of values appear under the frame
+for whichever mode is deciding them — S shows shutter, M shows both — and the
+offered stops are trimmed to what the active lens and format actually accept.
+ISO also has a readout under the exposure stepper, with AUTO at the top of its
+list; it and the M row edit the same value.
+
+Holding to focus moves focus only. Choosing what is sharp and choosing what is
+bright are separate decisions, and the exposure controls own the second.
+
 A rule-of-thirds guide sits over the live preview. Holding anywhere on it for
-a second pins focus and exposure to that point and marks it with a yellow ring;
-any tap lets them go again. Switching lens releases the point too, since it
+a second pins focus to that point and marks it with a yellow ring; any tap lets
+it go again. Switching lens releases the point too, since it
 means nothing on another lens.
 
 A monochrome frame stays monochrome. Loading one for re-filtering switches

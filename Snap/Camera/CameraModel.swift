@@ -113,9 +113,42 @@ final class CameraModel: NSObject, ObservableObject {
 
     private let developQueue = DispatchQueue(label: "com.snap.develop", qos: .userInitiated)
 
-    /// True while focus and exposure are pinned to a point rather than
-    /// roaming.
+    /// True while focus is pinned to a point rather than roaming.
     @Published private(set) var isFocusLocked = false
+
+    // MARK: - Exposure
+
+    @Published var exposureMode: ExposureMode = .auto {
+        didSet {
+            guard exposureMode != oldValue else { return }
+            // Manual needs a number to hold; borrow whatever the camera had
+            // arrived at rather than jumping to an arbitrary one.
+            if exposureMode == .manual, iso == nil { iso = meteredISO }
+            applyExposure()
+        }
+    }
+
+    /// The chosen shutter. Nil in auto.
+    @Published var shutterSpeed: ShutterSpeed? {
+        didSet { applyExposure() }
+    }
+
+    /// The chosen ISO, or nil for AUTO.
+    @Published var iso: Float? {
+        didSet { applyExposure() }
+    }
+
+    /// What the camera is actually running at, for the readout while on AUTO.
+    @Published private(set) var meteredISO: Float = 100
+
+    @Published private(set) var shutterSpeeds: [ShutterSpeed] = []
+    @Published private(set) var isoOptions: [Float] = []
+
+    /// The lens's fixed f-number. A readout, not a control — see
+    /// ExposureSettings.
+    @Published private(set) var aperture: Float?
+
+    private var isoTracker: AnyCancellable?
 
     /// The portrait frame size as delivered, needed to turn a point on screen
     /// into one the device understands. Written on the capture queue.
@@ -186,6 +219,7 @@ final class CameraModel: NSObject, ObservableObject {
                     // which the `defer` in configureSession has just done.
                     self.resolveRAWSupport()
                     self.discoverLenses()
+                    self.resolveExposureCapabilities()
                     self.isConfigured = true
                 } catch {
                     self.setState(.failed(error.localizedDescription))
@@ -268,6 +302,117 @@ final class CameraModel: NSObject, ObservableObject {
         .builtInTelephotoCamera: "Telephoto",
     ]
 
+    /// Reads what this lens and format will accept.
+    private func resolveExposureCapabilities() {
+        guard let device = videoDevice else { return }
+        let speeds = ShutterSpeed.supported(by: device.activeFormat)
+        let isos = ISOSetting.supported(by: device.activeFormat)
+        let fNumber = device.lensAperture
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.shutterSpeeds = speeds
+            self.isoOptions = isos
+            self.aperture = fNumber
+            // A speed the previous lens allowed may be out of range on this one.
+            if let current = self.shutterSpeed, !speeds.contains(current) {
+                self.shutterSpeed = speeds.first { CMTimeCompare($0.duration, current.duration) >= 0 } ?? speeds.last
+            }
+        }
+    }
+
+    /// Pushes the current mode to the device.
+    ///
+    /// iOS has no shutter-priority mode of its own: `setExposureModeCustom`
+    /// fixes both the shutter and the ISO. So priority is built on top of it —
+    /// the shutter is pinned and ISO is nudged to follow the meter, which is
+    /// what `startTrackingISO` does. Manual pins both and lets the meter drift.
+    private func applyExposure() {
+        let mode = exposureMode
+        let speed = shutterSpeed
+        let chosenISO = iso
+
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice else { return }
+
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+
+                switch mode {
+                case .auto:
+                    self.stopTrackingISO()
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    }
+
+                case .shutter, .manual:
+                    guard device.isExposureModeSupported(.custom) else { return }
+                    // Manual holds its own ISO; nothing should be moving it.
+                    if mode == .manual { self.stopTrackingISO() }
+
+                    let duration = speed?.duration ?? AVCaptureDevice.currentExposureDuration
+                    let isoValue = chosenISO.map {
+                        min(max($0, device.activeFormat.minISO), device.activeFormat.maxISO)
+                    } ?? device.iso
+
+                    device.setExposureModeCustom(duration: duration, iso: isoValue)
+                }
+            } catch {
+                return
+            }
+
+            if mode == .shutter {
+                DispatchQueue.main.async { self.startTrackingISO() }
+            }
+        }
+    }
+
+    /// Shutter priority's other half: with the shutter pinned, ISO is the only
+    /// thing left to balance the frame, so the meter's own error term drives
+    /// it. `exposureTargetOffset` is in stops, which is exactly the units ISO
+    /// scales in.
+    private func startTrackingISO() {
+        // Always rebuilt rather than kept: after a lens swap the old
+        // subscription is watching a device that is no longer running.
+        isoTracker = nil
+        guard let device = videoDevice else { return }
+
+        isoTracker = device.publisher(for: \.exposureTargetOffset)
+            .throttle(for: .milliseconds(300), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] offset in
+                self?.correctISO(by: offset)
+            }
+    }
+
+    private func stopTrackingISO() {
+        DispatchQueue.main.async { [weak self] in self?.isoTracker = nil }
+    }
+
+    private func correctISO(by offset: Float) {
+        guard exposureMode == .shutter, abs(offset) > 0.12 else { return }
+        let speed = shutterSpeed
+
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice,
+                  device.exposureMode == .custom else { return }
+
+            let format = device.activeFormat
+            let target = min(max(device.iso * pow(2, offset), format.minISO), format.maxISO)
+            guard abs(target - device.iso) > 1 else { return }
+
+            do {
+                try device.lockForConfiguration()
+                device.setExposureModeCustom(duration: speed?.duration ?? AVCaptureDevice.currentExposureDuration,
+                                             iso: target)
+                device.unlockForConfiguration()
+            } catch {
+                return
+            }
+            DispatchQueue.main.async { self.meteredISO = target }
+        }
+    }
+
     private func discoverLenses() {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: Array(CameraModel.lensNames.keys),
@@ -325,7 +470,11 @@ final class CameraModel: NSObject, ObservableObject {
 
             self.resolveRAWSupport()
             self.discoverLenses()
-            DispatchQueue.main.async { self.releaseFocus() }
+            self.resolveExposureCapabilities()
+            DispatchQueue.main.async {
+                self.releaseFocus()
+                self.applyExposure()
+            }
         }
     }
 
@@ -382,8 +531,12 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: - Focus
 
-    /// Pins focus and exposure to a point, given in the displayed square's own
-    /// normalised coordinates: x right, y down, 0...1.
+    /// Pins focus to a point, given in the displayed square's own normalised
+    /// coordinates: x right, y down, 0...1.
+    ///
+    /// Focus only. Metering is left where it is, so choosing what is sharp
+    /// doesn't also decide what is bright — those are separate decisions and
+    /// the exposure controls own the second one.
     func lockFocus(at point: CGPoint) {
         let target = devicePoint(from: point)
         isFocusLocked = true
@@ -395,10 +548,6 @@ final class CameraModel: NSObject, ObservableObject {
                 if device.isFocusPointOfInterestSupported, device.isFocusModeSupported(.autoFocus) {
                     device.focusPointOfInterest = target
                     device.focusMode = .autoFocus
-                }
-                if device.isExposurePointOfInterestSupported, device.isExposureModeSupported(.autoExpose) {
-                    device.exposurePointOfInterest = target
-                    device.exposureMode = .autoExpose
                 }
                 device.unlockForConfiguration()
             } catch {
@@ -415,16 +564,10 @@ final class CameraModel: NSObject, ObservableObject {
             guard let device = self?.videoDevice else { return }
             do {
                 try device.lockForConfiguration()
-                let centre = CGPoint(x: 0.5, y: 0.5)
                 if device.isFocusPointOfInterestSupported,
                    device.isFocusModeSupported(.continuousAutoFocus) {
-                    device.focusPointOfInterest = centre
+                    device.focusPointOfInterest = CGPoint(x: 0.5, y: 0.5)
                     device.focusMode = .continuousAutoFocus
-                }
-                if device.isExposurePointOfInterestSupported,
-                   device.isExposureModeSupported(.continuousAutoExposure) {
-                    device.exposurePointOfInterest = centre
-                    device.exposureMode = .continuousAutoExposure
                 }
                 device.unlockForConfiguration()
             } catch {

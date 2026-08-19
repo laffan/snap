@@ -35,6 +35,7 @@ struct CameraView: View {
             VStack(spacing: 0) {
                 viewer(edge: geometry.size.width)
                 sourceIndicator
+                exposureRows
 
                 if isEditingFilter {
                     FilterPanel(look: camera.look,
@@ -56,6 +57,13 @@ struct CameraView: View {
                     Spacer(minLength: 0)
                     controlRow
                     Spacer(minLength: 0)
+
+                    HStack {
+                        textButton("Filter") { setEditing(true) }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 6)
+
                     roll(selection: viewing, onSelect: { viewing = $0 })
                         .padding(.bottom, 10)
                 }
@@ -210,6 +218,31 @@ struct CameraView: View {
                   requiresNegative: requiresNegative)
     }
 
+    /// Shutter and ISO, shown only for the mode that is actually deciding
+    /// them. Manual decides both, so it shows both.
+    @ViewBuilder
+    private var exposureRows: some View {
+        if viewing == nil, camera.exposureMode != .auto {
+            VStack(spacing: 0) {
+                ValueRow(label: "S",
+                         values: camera.shutterSpeeds,
+                         title: { $0.label },
+                         selection: $camera.shutterSpeed)
+
+                if camera.exposureMode == .manual {
+                    ValueRow(label: "ISO",
+                             values: camera.isoOptions.map(ISOChoice.init),
+                             title: { ISOSetting.label($0.value) },
+                             selection: Binding(
+                                get: { camera.iso.map(ISOChoice.init) },
+                                set: { camera.iso = $0?.value }
+                             ))
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
     // MARK: - Controls
 
     private var controlRow: some View {
@@ -239,7 +272,7 @@ struct CameraView: View {
 
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
-                    textButton("Filter") { setEditing(true) }
+                    exposureModeRow
                     lensPicker
                     MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
                 }
@@ -247,12 +280,67 @@ struct CameraView: View {
                 Spacer()
 
                 if viewing == nil {
-                    ExposureControl(look: camera.look)
+                    VStack(spacing: 4) {
+                        ExposureControl(look: camera.look)
+                        isoPicker
+                    }
                 }
             }
             .padding(.horizontal, 14)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// The f-number sits where an aperture-priority button would, because the
+    /// lens has one aperture and nothing to prioritise. S and M are the modes
+    /// that mean something here.
+    private var exposureModeRow: some View {
+        HStack(spacing: 2) {
+            if let aperture = camera.aperture {
+                Text(String(format: "\u{0192}%.1f", aperture))
+                    .font(.system(size: 12, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.35))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+            }
+
+            ForEach([ExposureMode.shutter, .manual]) { mode in
+                Button {
+                    // Tapping the lit mode drops back to auto.
+                    camera.exposureMode = camera.exposureMode == mode ? .auto : mode
+                } label: {
+                    Text(mode.label)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(camera.exposureMode == mode ? Color.snapAccent : .white.opacity(0.75))
+                        .frame(width: 26)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: camera.exposureMode)
+    }
+
+    /// ISO, under the exposure stepper. AUTO sits at the top of the list.
+    private var isoPicker: some View {
+        Menu {
+            Button("AUTO") { camera.iso = nil }
+            ForEach(camera.isoOptions, id: \.self) { value in
+                Button(ISOSetting.label(value)) { camera.iso = value }
+            }
+        } label: {
+            Text(ISOSetting.label(camera.iso))
+                .font(.system(size: 11, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(camera.iso == nil ? .white.opacity(0.5) : Color.snapAccent)
+                .frame(minWidth: 34)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("ISO")
     }
 
     @ViewBuilder
