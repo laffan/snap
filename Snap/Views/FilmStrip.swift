@@ -60,7 +60,7 @@ struct FilmStrip: View {
                             Button {
                                 onUseLook(shot)
                             } label: {
-                                Label("Use Filter Data", systemImage: "camera.filters")
+                                Label("Use Filter Settings", systemImage: "camera.filters")
                             }
 
                             Button {

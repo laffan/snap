@@ -422,7 +422,13 @@ final class CameraModel: NSObject, ObservableObject {
             return
         }
 
-        renderer.setImage(isPeekingSource ? developedSource : look.filter.apply(to: developedSource))
+        if isPeekingSource {
+            renderer.setImage(look.profile.blackAndWhite
+                              ? RAWDeveloper.desaturated(developedSource)
+                              : developedSource)
+        } else {
+            renderer.setImage(look.filter.apply(to: developedSource))
+        }
     }
 
     /// Runs the capture pipeline over the selected negative instead of the

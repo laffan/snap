@@ -12,6 +12,8 @@ struct SliderRow: View {
     let label: String
     @Binding var value: Float
     var range: ClosedRange<Float> = -100...100
+    /// Tints the label — used to give each colour band its own colour.
+    var labelColor: Color = .white.opacity(0.75)
     var decimals: Int = 0
     /// Value the double-tap reset returns to.
     var neutral: Float = 0
@@ -25,7 +27,7 @@ struct SliderRow: View {
         VStack(spacing: 2) {
             HStack {
                 Text(label)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(labelColor)
                 Spacer()
                 Text(formatted)
                     .foregroundStyle(value == neutral ? .white.opacity(0.35) : .white.opacity(0.9))

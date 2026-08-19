@@ -135,8 +135,10 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-Below the frame sit **Filter** and **Camera** on the left, the shutter centred,
-and exposure on the right. Camera picks the lens; exposure steps in whole stops
+Below the frame sit **Filter**, a row of dots for the lenses, and **B&W** on
+the left, the shutter centred, and exposure on the right. The dots widen left
+to right the way the lenses do, filled for the one in use; exposure steps in
+whole stops
 and is the same value as the panel's Exposure slider — one setting reachable
 two ways. It is a develop setting rather than a camera one, so it re-applies
 when a negative is re-filtered and travels to Lightroom as `crs:Exposure2012`.
@@ -145,6 +147,13 @@ Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
 that returns to the live preview. Long-press for **Use Filter Data** (puts that
 shot's settings back on the sliders), **Share JPEG**, **Share RAW** (only when
 the capture was RAW), or **Delete Image**.
+
+**B&W** renders the frame monochrome, and the conversion happens at the *end*
+of the grade rather than the start — so the colour mixer still shapes it, the
+way a black-and-white mixer does: desaturating a band changes that band's
+luminance. The negative keeps its colour data, since this is how the frame is
+rendered rather than what was recorded, but peeking at it behind a monochrome
+look shows it desaturated so the two are comparable.
 
 Storing full-resolution copies is what makes Bundle and Share work on the
 original file rather than a thumbnail; it also means the app's storage grows

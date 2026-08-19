@@ -117,11 +117,21 @@ enum RAWDeveloper {
                              profile: PositiveFilmProfile,
                              maxPixelSize: CGFloat,
                              context: CIContext) -> UIImage? {
-        guard let square = developedImage(at: url, profile: profile, maxPixelSize: maxPixelSize),
-              let cgImage = context.createCGImage(square, from: square.extent) else {
+        guard var square = developedImage(at: url, profile: profile, maxPixelSize: maxPixelSize) else {
             return nil
         }
+        // The negative keeps its colour, but showing it beside a monochrome
+        // frame in colour would just be confusing.
+        if profile.blackAndWhite {
+            square = desaturated(square)
+        }
+        guard let cgImage = context.createCGImage(square, from: square.extent) else { return nil }
         return UIImage(cgImage: cgImage)
+    }
+
+    /// Fully desaturated, for previewing a negative behind a monochrome look.
+    static func desaturated(_ image: CIImage) -> CIImage {
+        image.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0])
     }
 
     /// The file's own metadata, which the derived JPEG carries forward.

@@ -183,9 +183,10 @@ struct CameraView: View {
             }
 
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     textButton("Filter") { setEditing(true) }
-                    lensMenu
+                    lensPicker
+                    MonochromeToggle(look: camera.look)
                 }
 
                 Spacer()
@@ -211,32 +212,36 @@ struct CameraView: View {
         .buttonStyle(.plain)
     }
 
-    /// Lens picker. Hidden on a single-camera device, where there is nothing
-    /// to choose.
+    /// One dot per lens, widening left to right the way the lenses do. Hidden
+    /// on a single-camera device, where there is nothing to choose.
     @ViewBuilder
-    private var lensMenu: some View {
+    private var lensPicker: some View {
         if camera.lenses.count > 1 {
-            Menu {
-                ForEach(camera.lenses) { lens in
+            HStack(spacing: 0) {
+                ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
+                    let diameter = 7 + CGFloat(index) * 3.5
+                    let isCurrent = lens == camera.currentLens
+
                     Button {
                         camera.selectLens(lens)
                     } label: {
-                        if lens == camera.currentLens {
-                            Label(lens.name, systemImage: "checkmark")
-                        } else {
-                            Text(lens.name)
-                        }
+                        Circle()
+                            .fill(isCurrent ? Color.white : Color.clear)
+                            .overlay {
+                                Circle().strokeBorder(Color.white.opacity(isCurrent ? 0 : 0.55),
+                                                      lineWidth: 1)
+                            }
+                            .frame(width: diameter, height: diameter)
+                            // The dot is far too small to aim at; the tap
+                            // target isn't.
+                            .frame(width: 26, height: 30)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(lens.name)
                 }
-            } label: {
-                Text("Camera")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.75))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .padding(.leading, 8)
         }
     }
 
@@ -309,6 +314,30 @@ struct CameraView: View {
         } catch {
             camera.errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// Black-and-white mode. Yellow when on — the only colour the interface uses,
+/// so switched-on always looks the same.
+private struct MonochromeToggle: View {
+
+    @ObservedObject var look: LookModel
+
+    var body: some View {
+        Button {
+            look.profile.blackAndWhite.toggle()
+        } label: {
+            Text("B&W")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(look.profile.blackAndWhite ? Color.snapAccent : .white.opacity(0.75))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.12), value: look.profile.blackAndWhite)
+        .accessibilityLabel("Black and white")
+        .accessibilityValue(look.profile.blackAndWhite ? "on" : "off")
     }
 }
 

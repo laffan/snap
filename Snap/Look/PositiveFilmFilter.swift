@@ -166,6 +166,14 @@ final class PositiveFilmFilter {
         color = applyColorMixer(color, bands: bands)
         color = sCurve(color, amount: profile.toneCurveAmount)
         color = liftBlacks(color, by: profile.blackLift)
+
+        // Last, so the colour mixer still shapes the result: a band that was
+        // desaturated arrives here darker or lighter than one that wasn't,
+        // which is exactly how a black-and-white mixer works.
+        if profile.blackAndWhite {
+            color = RGB(repeating: luma(clamp01(color)))
+        }
+
         return clamp01(color)
     }
 

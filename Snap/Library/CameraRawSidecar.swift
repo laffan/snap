@@ -42,6 +42,7 @@ enum CameraRawSidecar {
             "crs:WhiteBalance=\"As Shot\"",
             "crs:CameraProfile=\"\(cameraProfile)\"",
             "crs:HasSettings=\"True\"",
+            "crs:ConvertToGrayscale=\"\(profile.blackAndWhite ? "True" : "False")\"",
         ]
 
         // Basic panel. Exposure is the one slider Lightroom keeps in stops

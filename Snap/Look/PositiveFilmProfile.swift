@@ -24,18 +24,18 @@ struct PositiveFilmProfile: Codable, Equatable {
     var exposure: Float = 0
 
     /// Lightroom Contrast, −100...100.
-    var contrast: Float = 25
+    var contrast: Float = 35
 
     /// Lightroom Highlights, −100...100. Negative recovers bright areas.
-    var highlights: Float = -20
+    var highlights: Float = -12
 
     /// Lightroom Shadows, −100...100. Positive opens deep shadow detail.
-    var shadows: Float = 28
+    var shadows: Float = -20
 
     /// Lightroom Blacks, −100...100. Negative crushes the black point.
     /// A small negative value gives the toe a bit of bite without closing
     /// up the shadow detail that `shadows` just opened.
-    var blacks: Float = -6
+    var blacks: Float = -5
 
     /// Lightroom Clarity, −100...100. Midtone local contrast.
     var clarity: Float = 0
@@ -43,15 +43,23 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// Sharpening, 0...100. Where clarity is a wide, low-amplitude unsharp
     /// mask read as midtone local contrast, this is the narrow one read as
     /// detail.
-    var sharpness: Float = 0
+    var sharpness: Float = 20
 
     /// Lightroom Vibrance, −100...100.
     var vibrance: Float = 25
 
+    /// Renders the frame monochrome.
+    ///
+    /// The conversion happens at the end of the grade, so the colour mixer
+    /// still shapes it: desaturating a band changes that band's luminance, the
+    /// way a black-and-white mixer does. The negative keeps its colour data —
+    /// this is how the frame is rendered, not what was recorded.
+    var blackAndWhite = false
+
     // MARK: - Tone curve
 
     /// A gentle extra S on top of Contrast, on the same −100...100 scale.
-    var toneCurveS: Float = 50
+    var toneCurveS: Float = 60
 
     /// How far the bottom of the curve is lifted off the floor, in output
     /// units. This is the matte foot; 0 gives a true black.
@@ -97,7 +105,7 @@ struct PositiveFilmProfile: Codable, Equatable {
         var saturation: Float
     }
 
-    var redPrimary   = Primary(hue:  +5, saturation:  +5)
+    var redPrimary   = Primary(hue:  -5, saturation:  +5)
     var greenPrimary = Primary(hue: -10, saturation:   0)
     var bluePrimary  = Primary(hue: +10, saturation: -10)
 
@@ -177,6 +185,7 @@ extension PositiveFilmProfile {
 
     enum CodingKeys: String, CodingKey {
         case exposure, contrast, highlights, shadows, blacks, clarity, sharpness, vibrance
+        case blackAndWhite
         case toneCurveS, blackLift
         case bands
         case redPrimary, greenPrimary, bluePrimary
@@ -194,6 +203,10 @@ extension PositiveFilmProfile {
             ((try? container.decodeIfPresent(Float.self, forKey: key)) ?? nil) ?? fallback
         }
 
+        func bool(_ key: CodingKeys, _ fallback: Bool) -> Bool {
+            ((try? container.decodeIfPresent(Bool.self, forKey: key)) ?? nil) ?? fallback
+        }
+
         exposure   = float(.exposure, exposure)
         contrast   = float(.contrast, contrast)
         highlights = float(.highlights, highlights)
@@ -202,6 +215,7 @@ extension PositiveFilmProfile {
         clarity    = float(.clarity, clarity)
         sharpness  = float(.sharpness, sharpness)
         vibrance   = float(.vibrance, vibrance)
+        blackAndWhite = bool(.blackAndWhite, blackAndWhite)
         toneCurveS = float(.toneCurveS, toneCurveS)
         blackLift  = float(.blackLift, blackLift)
 

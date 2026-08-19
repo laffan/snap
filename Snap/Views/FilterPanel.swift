@@ -101,6 +101,14 @@ struct FilterPanel<Strip: View>: View {
                       range: 0...100, onEditingChanged: editing)
             SliderRow(label: "Vibrance", value: $look.profile.vibrance,
                       onEditingChanged: editing)
+
+            Toggle(isOn: $look.profile.blackAndWhite) {
+                Text("Black & White")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .tint(Color.snapAccent)
+            .padding(.top, 2)
         }
     }
 
@@ -115,43 +123,63 @@ struct FilterPanel<Strip: View>: View {
 
     private var colorMixer: some View {
         FilterSection(title: "Color Mixer") {
+            subheading("Hue")
             ForEach(look.profile.bands.indices, id: \.self) { index in
-                VStack(spacing: 2) {
-                    Text(look.profile.bands[index].name)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                SliderRow(label: look.profile.bands[index].name,
+                          value: $look.profile.bands[index].hue,
+                          labelColor: swatch(look.profile.bands[index].center),
+                          onEditingChanged: editing)
+            }
 
-                    SliderRow(label: "Hue", value: $look.profile.bands[index].hue,
-                              onEditingChanged: editing)
-                    SliderRow(label: "Saturation", value: $look.profile.bands[index].saturation,
-                              onEditingChanged: editing)
-                }
-                .padding(.bottom, 6)
+            subheading("Saturation")
+            ForEach(look.profile.bands.indices, id: \.self) { index in
+                SliderRow(label: look.profile.bands[index].name,
+                          value: $look.profile.bands[index].saturation,
+                          labelColor: swatch(look.profile.bands[index].center),
+                          onEditingChanged: editing)
             }
         }
     }
 
+    /// The three calibration primaries, and the hue each one sits at.
+    private var primaries: [(name: String, hue: Float, binding: Binding<PositiveFilmProfile.Primary>)] {
+        [("Red", 0, $look.profile.redPrimary),
+         ("Green", 120, $look.profile.greenPrimary),
+         ("Blue", 240, $look.profile.bluePrimary)]
+    }
+
     private var calibration: some View {
         FilterSection(title: "Calibration") {
-            primary("Red Primary", $look.profile.redPrimary)
-            primary("Green Primary", $look.profile.greenPrimary)
-            primary("Blue Primary", $look.profile.bluePrimary)
+            subheading("Hue")
+            ForEach(primaries, id: \.name) { primary in
+                SliderRow(label: primary.name,
+                          value: primary.binding.hue,
+                          labelColor: swatch(primary.hue),
+                          onEditingChanged: editing)
+            }
+
+            subheading("Saturation")
+            ForEach(primaries, id: \.name) { primary in
+                SliderRow(label: primary.name,
+                          value: primary.binding.saturation,
+                          labelColor: swatch(primary.hue),
+                          onEditingChanged: editing)
+            }
         }
     }
 
-    private func primary(_ name: String,
-                         _ binding: Binding<PositiveFilmProfile.Primary>) -> some View {
-        VStack(spacing: 2) {
-            Text(name)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private func subheading(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.white.opacity(0.55))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 6)
+    }
 
-            SliderRow(label: "Hue", value: binding.hue, onEditingChanged: editing)
-            SliderRow(label: "Saturation", value: binding.saturation, onEditingChanged: editing)
-        }
-        .padding(.bottom, 6)
+    /// Each band labelled in its own colour. Taken straight from the band's
+    /// centre hue, held back from full saturation so it stays legible on black.
+    private func swatch(_ hue: Float) -> Color {
+        Color(hue: Double(hue) / 360, saturation: 0.55, brightness: 1)
     }
 
     @ViewBuilder
