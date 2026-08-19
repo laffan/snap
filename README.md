@@ -148,6 +148,17 @@ that returns to the live preview. Long-press for **Use Filter Data** (puts that
 shot's settings back on the sliders), **Share JPEG**, **Share RAW** (only when
 the capture was RAW), or **Delete Image**.
 
+A rule-of-thirds guide sits over the live preview. Holding anywhere on it for
+a second pins focus and exposure to that point and marks it with a yellow ring;
+any tap lets them go again. Switching lens releases the point too, since it
+means nothing on another lens.
+
+**PS** beside the shutter saves the preview frame itself, skipping the RAW loop
+entirely — no sensor round trip, no demosaic, no full-resolution grade, since
+the graded frame is already on screen. It is as close to zero shutter lag as
+the app gets, at the cost of coming out at preview resolution with no negative
+behind it.
+
 **B&W** renders the frame monochrome, and the conversion happens at the *end*
 of the grade rather than the start — so the colour mixer still shapes it, the
 way a black-and-white mixer does: desaturating a band changes that band's

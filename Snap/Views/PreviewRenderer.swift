@@ -55,6 +55,13 @@ final class PreviewRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Whatever is on screen right now, for grabbing the preview as a photo.
+    var currentImage: CIImage? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pendingImage
+    }
+
     func clear() {
         lock.lock()
         pendingImage = nil

@@ -101,6 +101,15 @@ final class CameraModel: NSObject, ObservableObject {
 
     private let developQueue = DispatchQueue(label: "com.snap.develop", qos: .userInitiated)
 
+    /// True while focus and exposure are pinned to a point rather than
+    /// roaming.
+    @Published private(set) var isFocusLocked = false
+
+    /// The portrait frame size as delivered, needed to turn a point on screen
+    /// into one the device understands. Written on the capture queue.
+    private let frameLock = NSLock()
+    private var portraitFrameSize: CGSize = .zero
+
     private var videoDevice: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
 
@@ -304,6 +313,7 @@ final class CameraModel: NSObject, ObservableObject {
 
             self.resolveRAWSupport()
             self.discoverLenses()
+            DispatchQueue.main.async { self.releaseFocus() }
         }
     }
 
@@ -356,6 +366,80 @@ final class CameraModel: NSObject, ObservableObject {
         settings.photoQualityPrioritization = .quality
         settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         return settings
+    }
+
+    // MARK: - Focus
+
+    /// Pins focus and exposure to a point, given in the displayed square's own
+    /// normalised coordinates: x right, y down, 0...1.
+    func lockFocus(at point: CGPoint) {
+        let target = devicePoint(from: point)
+        isFocusLocked = true
+
+        sessionQueue.async { [weak self] in
+            guard let device = self?.videoDevice else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusPointOfInterestSupported, device.isFocusModeSupported(.autoFocus) {
+                    device.focusPointOfInterest = target
+                    device.focusMode = .autoFocus
+                }
+                if device.isExposurePointOfInterestSupported, device.isExposureModeSupported(.autoExpose) {
+                    device.exposurePointOfInterest = target
+                    device.exposureMode = .autoExpose
+                }
+                device.unlockForConfiguration()
+            } catch {
+                // Another configuration holds the lock; the next tap retries.
+            }
+        }
+    }
+
+    func releaseFocus() {
+        guard isFocusLocked else { return }
+        isFocusLocked = false
+
+        sessionQueue.async { [weak self] in
+            guard let device = self?.videoDevice else { return }
+            do {
+                try device.lockForConfiguration()
+                let centre = CGPoint(x: 0.5, y: 0.5)
+                if device.isFocusPointOfInterestSupported,
+                   device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusPointOfInterest = centre
+                    device.focusMode = .continuousAutoFocus
+                }
+                if device.isExposurePointOfInterestSupported,
+                   device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposurePointOfInterest = centre
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+            } catch {
+            }
+        }
+    }
+
+    /// Turns a point on the square preview into one `focusPointOfInterest`
+    /// understands.
+    ///
+    /// Two conversions stack. The square is a centred crop of the portrait
+    /// frame, so the point first has to be placed back into the whole frame.
+    /// Then the device wants it in the sensor's own landscape frame — (0,0) at
+    /// the top left with the device in landscape, home button right — which is
+    /// a quarter turn away from what the viewer shows.
+    private func devicePoint(from point: CGPoint) -> CGPoint {
+        frameLock.lock()
+        let size = portraitFrameSize
+        frameLock.unlock()
+
+        guard size.width > 0, size.height > 0 else { return CGPoint(x: 0.5, y: 0.5) }
+
+        let edge = min(size.width, size.height)
+        let inFrame = CGPoint(x: (point.x * edge + (size.width - edge) / 2) / size.width,
+                              y: (point.y * edge + (size.height - edge) / 2) / size.height)
+
+        return CGPoint(x: inFrame.y, y: 1 - inFrame.x)
     }
 
     // MARK: - Re-filtering a stored negative
@@ -511,6 +595,41 @@ final class CameraModel: NSObject, ObservableObject {
         return (embedded ?? squared ?? data, settings)
     }
 
+    /// Saves the preview frame itself, skipping the RAW loop entirely.
+    ///
+    /// There is no sensor round trip, no demosaic and no full-resolution
+    /// grade — the graded frame is already on screen, so this is as close to
+    /// zero shutter lag as the app gets. The trade is resolution: it comes out
+    /// at preview size rather than sensor size, and there is no negative
+    /// behind it.
+    func capturePreviewFrame() {
+        guard state == .running, !isCapturing, let image = renderer.currentImage else { return }
+        isCapturing = true
+
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        flashShutter()
+
+        let profile = look.profile
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let jpeg = try PhotoEncoder.jpeg(from: image,
+                                                 profile: profile,
+                                                 sourceMetadata: [:],
+                                                 context: self.stillContext)
+                _ = try self.store.add(imageData: jpeg,
+                                       rawData: nil,
+                                       xmp: nil,
+                                       profile: profile)
+                try await self.library.save(jpeg)
+                self.finishCapture(error: nil)
+            } catch {
+                self.finishCapture(error: error.localizedDescription)
+            }
+        }
+    }
+
     private func flashShutter() {
         withAnimation(.easeIn(duration: 0.06)) { isShutterFlashing = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
@@ -557,7 +676,12 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
         // but its frames aren't what the viewer is showing.
         if isShowingVersion { return }
 
-        var image = CIImage(cvPixelBuffer: pixelBuffer).centerSquareCropped()
+        let frame = CIImage(cvPixelBuffer: pixelBuffer)
+        frameLock.lock()
+        portraitFrameSize = frame.extent.size
+        frameLock.unlock()
+
+        var image = frame.centerSquareCropped()
 
         // Grade at preview resolution, never larger.
         let edge = image.extent.width

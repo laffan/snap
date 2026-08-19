@@ -21,6 +21,12 @@ struct CameraView: View {
     @State private var viewing: Shot? = nil
     /// True while the viewer is being held down to show the negative.
     @State private var showsRAW = false
+    /// Where focus is pinned, in the preview's own coordinates.
+    @State private var focusPoint: CGPoint? = nil
+    @State private var pressLocation: CGPoint = .zero
+    /// Set when a hold pinned focus, so the touch ending doesn't immediately
+    /// read as the tap that releases it.
+    @State private var didLockFocus = false
 
     private var store: ShotStore { camera.store }
 
@@ -100,7 +106,7 @@ struct CameraView: View {
         ZStack {
             if let viewing {
                 ShotView(store: store, shot: viewing, edge: edge, showsRAW: $showsRAW)
-            } else {
+            } else if camera.versionSource != nil {
                 livePreview
                     // Holding a negative that is under the sliders shows the
                     // development with no look on it, the same way the
@@ -108,10 +114,36 @@ struct CameraView: View {
                     .onLongPressGesture(minimumDuration: 0.25, pressing: { pressing in
                         if !pressing { camera.setPeekingSource(false) }
                     }, perform: {
-                        guard camera.versionSource != nil else { return }
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         camera.setPeekingSource(true)
                     })
+            } else {
+                livePreview
+                    .overlay { ThirdsGrid() }
+                    .overlay { focusRing(edge: edge) }
+                    // The two gestures are kept apart: a tap anywhere lets
+                    // focus go, a second of holding pins it where the finger
+                    // is. A long press carries no location of its own, so the
+                    // drag alongside it is what supplies one.
+                    .gesture(
+                        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                            .onChanged { pressLocation = $0.location }
+                            .onEnded { _ in
+                                // A touch that never became a hold is a tap,
+                                // and a tap lets focus go.
+                                if didLockFocus {
+                                    didLockFocus = false
+                                } else {
+                                    camera.releaseFocus()
+                                    withAnimation(.easeOut(duration: 0.15)) { focusPoint = nil }
+                                }
+                            }
+                            .simultaneously(with: LongPressGesture(minimumDuration: 1)
+                                .onEnded { _ in
+                                    didLockFocus = true
+                                    lockFocus(at: pressLocation, edge: edge)
+                                })
+                    )
             }
 
             // A short black blink, the way a mechanical shutter reads.
@@ -180,6 +212,23 @@ struct CameraView: View {
                 CloseButton { viewing = nil }
             } else {
                 ShutterButton(isBusy: camera.isCapturing) { camera.capture() }
+
+                Button {
+                    camera.capturePreviewFrame()
+                } label: {
+                    Text("PS")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(width: 38, height: 38)
+                        .overlay { Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1) }
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(camera.isCapturing)
+                // Just clear of the shutter's 74pt ring, and well clear of the
+                // exposure stepper at the trailing edge.
+                .offset(x: 64)
+                .accessibilityLabel("Capture preview frame")
             }
 
             HStack(alignment: .center) {
@@ -198,6 +247,27 @@ struct CameraView: View {
             .padding(.horizontal, 14)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func focusRing(edge: CGFloat) -> some View {
+        if let focusPoint, camera.isFocusLocked {
+            Circle()
+                .strokeBorder(Color.snapAccent, lineWidth: 1.5)
+                .frame(width: 20, height: 20)
+                .position(focusPoint)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
+    }
+
+    private func lockFocus(at location: CGPoint, edge: CGFloat) {
+        guard edge > 0 else { return }
+        let normalized = CGPoint(x: min(max(location.x / edge, 0), 1),
+                                 y: min(max(location.y / edge, 0), 1))
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation(.easeOut(duration: 0.15)) { focusPoint = location }
+        camera.lockFocus(at: normalized)
     }
 
     private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -314,6 +384,30 @@ struct CameraView: View {
         } catch {
             camera.errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// A rule-of-thirds guide, light enough to compose against without competing
+/// with the frame.
+private struct ThirdsGrid: View {
+
+    var body: some View {
+        GeometryReader { geometry in
+            Path { path in
+                for step in 1...2 {
+                    let fraction = CGFloat(step) / 3
+                    let x = geometry.size.width * fraction
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: geometry.size.height))
+
+                    let y = geometry.size.height * fraction
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: geometry.size.width, y: y))
+                }
+            }
+            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+        }
+        .allowsHitTesting(false)
     }
 }
 
