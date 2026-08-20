@@ -10,8 +10,8 @@
 //  durable one, so a file that leaves the app still describes itself.
 //
 //  A RAW capture keeps its DNG here too, which is what lets the strip share
-//  the negative and puts it in the bundle. It also makes the store grow
-//  quickly: a DNG runs to tens of megabytes.
+//  the negative. It also makes the store grow quickly: a DNG runs to tens of
+//  megabytes.
 //
 
 import Combine
@@ -27,18 +27,6 @@ final class ShotStore: ObservableObject {
 
     private let directory: URL
     private let fileManager = FileManager.default
-
-    enum StoreError: LocalizedError {
-        case nothingToBundle
-        case bundleFailed
-
-        var errorDescription: String? {
-            switch self {
-            case .nothingToBundle: return "There's nothing saved to bundle yet."
-            case .bundleFailed:    return "The bundle could not be created."
-            }
-        }
-    }
 
     init() {
         let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -182,41 +170,5 @@ final class ShotStore: ObservableObject {
         } else {
             DispatchQueue.main.async { [weak self] in self?.reload() }
         }
-    }
-
-    // MARK: - Bundling
-
-    /// Zips the whole store.
-    ///
-    /// `NSFileCoordinator`'s `.forUploading` option hands back a zip of a
-    /// directory, which avoids taking on an archiving dependency for one
-    /// button. The archive it produces is temporary, so it gets copied out
-    /// before the accessor block returns.
-    func makeBundle() throws -> URL {
-        guard !shots.isEmpty else { throw StoreError.nothingToBundle }
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        let destination = fileManager.temporaryDirectory
-            .appendingPathComponent("Snap-\(formatter.string(from: Date())).zip")
-
-        var accessorResult: Result<URL, Error>?
-        var coordinatorError: NSError?
-
-        NSFileCoordinator().coordinate(readingItemAt: directory,
-                                       options: [.forUploading],
-                                       error: &coordinatorError) { zipURL in
-            do {
-                try? fileManager.removeItem(at: destination)
-                try fileManager.copyItem(at: zipURL, to: destination)
-                accessorResult = .success(destination)
-            } catch {
-                accessorResult = .failure(error)
-            }
-        }
-
-        if let coordinatorError { throw coordinatorError }
-        guard let accessorResult else { throw StoreError.bundleFailed }
-        return try accessorResult.get()
     }
 }

@@ -6,8 +6,8 @@
 import SwiftUI
 import UIKit
 
-/// Hands one or more files — a photo, a negative and its sidecar, or a whole
-/// bundle — to the system share sheet.
+/// Hands one or more files — a photo, or a negative and its sidecar — to the
+/// system share sheet.
 struct ShareSheet: UIViewControllerRepresentable {
 
     let urls: [URL]

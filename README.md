@@ -41,7 +41,7 @@ resolution.
 | `Camera/CIImage+Square.swift` | The centred 1:1 crop shared by preview and capture |
 | `Camera/PhotoEncoder.swift` | JPEG encoding, and the settings embedded in EXIF |
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
-| `Library/ShotStore.swift` | Every shot on disk, and the zip bundle |
+| `Library/ShotStore.swift` | Every shot on disk |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
 | `Views/FilterPanel.swift` | The slider editor, its menu, and the handle that resizes it |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
@@ -64,7 +64,7 @@ did. So the grade moves to the other end of the pipeline instead: the sensor
 data is developed here, graded here, and written out as JPEG.
 
 The DNG is kept in the app's store next to the JPEG, where the roll can share
-it and Bundle carries it.
+it.
 
 ### The negative opens cropped and graded
 
@@ -122,7 +122,7 @@ Captures are JPEG, and each one is written with the profile that made it in
 the EXIF user comment (about 750 bytes of JSON, ~1% of what an EXIF block
 holds), alongside the camera's own exposure and lens metadata. That happens on
 every shot whether or not the filter editor was ever opened, so any file
-leaving the app — camera roll, share sheet, bundle — describes itself.
+leaving the app — camera roll, share sheet — describes itself.
 
 The profile decodes leniently: a key that isn't in the JSON keeps its default
 instead of failing the whole decode, so shots saved by an older build still
@@ -135,22 +135,23 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-Below the frame sit the lens dots, the exposure modes and **B&W** stacked down
-the left, the shutter centred, and exposure on the right, with **Filter**
-centred under all of it. The dots widen left to right the way the lenses do,
-filled for the one in use, and sit above the modes because which lens is
-looking comes before how it is metered; exposure steps in whole stops
-and is the same value as the panel's Exposure slider — one setting reachable
-two ways. It is a develop setting rather than a camera one, so it re-applies
-when a negative is re-filtered and travels to Lightroom as `crs:Exposure2012`.
+Below the frame sit the lens dots and the exposure modes stacked down the
+left, the shutter centred with black-and-white directly above it, exposure on
+the right, and **Filter** centred under all of it. The dots widen left to right
+the way the lenses do, filled for the one in use, and sit above the modes
+because which lens is looking comes before how it is metered; exposure steps in
+whole stops and is the same value as the panel's Exposure slider — one setting
+reachable two ways. It is a develop setting rather than a camera one, so it
+re-applies when a negative is re-filtered and travels to Lightroom as
+`crs:Exposure2012`.
 
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
 that returns to the live preview. The camera controls go with the exposure
-stepper while a saved frame is up: lens, mode and B&W all decide how the *next*
-photograph is taken, and none of them applies to one that already exists.
-Long-press for **Use Filter Data** (puts that shot's settings back on the
-sliders), **Share JPEG**, **Share RAW** (only when the capture was RAW), or
-**Delete Image**.
+stepper while a saved frame is up: lens, mode and black-and-white all decide
+how the *next* photograph is taken, and none of them applies to one that
+already exists. Long-press for **Use Filter Data** (puts that shot's settings
+back on the sliders), **Share JPEG**, **Share RAW** (only when the capture was
+RAW), or **Delete Image**.
 
 Two kinds of frame are marked in the corner of their thumbnail: a dot for one
 taken with **PS**, and a square for one made in the filter screen — a
@@ -172,14 +173,15 @@ built on top of it — the shutter is held and ISO is nudged toward the meter,
 using `exposureTargetOffset`, which reports its error in stops, exactly the
 units ISO scales in.
 
-**M** pins both and lets the meter drift. Selecting it borrows whatever ISO the
-camera had arrived at rather than jumping to an arbitrary number.
+**S/I** pins both and lets the meter drift, and says which two it is pinning:
+shutter and ISO. Selecting it borrows whatever ISO the camera had arrived at
+rather than jumping to an arbitrary number.
 
 Tapping the lit mode returns to auto. The rows of values appear under the frame
-for whichever mode is deciding them — S shows shutter, M shows both — and the
+for whichever mode is deciding them — S shows shutter, S/I shows both — and the
 offered stops are trimmed to what the active lens and format actually accept.
 ISO also has a readout under the exposure stepper, with AUTO at the top of its
-list; it and the M row edit the same value.
+list; it and the S/I row edit the same value.
 
 ### The meter, and what the preview can't tell you
 
@@ -200,6 +202,20 @@ readout under the frame is `exposureTargetOffset`: how far the chosen settings
 sit from what the meter wants, in stops, negative for under. It appears only
 when the exposure is being driven by hand, since auto holds it at zero. Past
 half a stop it brightens; past a stop and a half it turns yellow.
+
+Tapping it takes the reading back the other way: a frame the meter calls 1.5
+stops under sets Exposure to +1.5. It replaces rather than accumulates, because
+the reading is about what the camera is doing and doesn't move when the develop
+exposure does — so tapping twice means the same as tapping once. This is a
+correction in the develop rather than in the camera; to fix it at the sensor
+instead, move the shutter or ISO row and watch the number come back to zero.
+
+The reading itself is kept off `CameraModel` on purpose. It changes several
+times a second, and anything published there invalidates the whole camera
+screen at that rate — enough to make a long-press menu flicker and swallow the
+tap that follows it. `ExposureMeter` is its own small observable, watched only
+by the readouts that want it, and it drops changes finer than a tenth of a stop
+since that is all the readout can show.
 
 Video HDR is switched off for the same reason. Left on, the video stream gets
 local tone mapping the still explicitly does not, so the preview would show
@@ -230,16 +246,18 @@ the graded frame is already on screen. It is as close to zero shutter lag as
 the app gets, at the cost of coming out at preview resolution with no negative
 behind it.
 
-**B&W** renders the frame monochrome, and the conversion happens at the *end*
-of the grade rather than the start — so the colour mixer still shapes it, the
-way a black-and-white mixer does: desaturating a band changes that band's
-luminance. The negative keeps its colour data, since this is how the frame is
-rendered rather than what was recorded, but peeking at it behind a monochrome
-look shows it desaturated so the two are comparable.
+**The circle with a diagonal through it**, directly above the shutter, renders
+the frame monochrome; switching it on inverts it to a white disc with a black
+cut. The conversion happens at the *end* of the grade rather than the start —
+so the colour mixer still shapes it, the way a black-and-white mixer does:
+desaturating a band changes that band's luminance. The negative keeps its
+colour data, since this is how the frame is rendered rather than what was
+recorded, but peeking at it behind a monochrome look shows it desaturated so
+the two are comparable.
 
-Storing full-resolution copies is what makes Bundle and Share work on the
-original file rather than a thumbnail; it also means the app's storage grows
-with use, and Delete is the way to reclaim it.
+Storing full-resolution copies is what makes Share work on the original file
+rather than a thumbnail; it also means the app's storage grows with use, and
+Delete is the way to reclaim it.
 
 ## Re-filtering a negative
 
@@ -267,21 +285,22 @@ with every knob the look exposes, grouped the way Lightroom groups them —
 Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the
 live preview. Double-tap any slider to return it to neutral.
 
-The panel's own actions hang off a menu beside the **Filter** title:
+The panel's own actions hang off a menu beside the **Filter** title, listed
+bottom-up so the capture — the one that ends a session at the panel — sits
+nearest the thumb:
 
 | Item | Does |
 | --- | --- |
-| **Snap** / **Version** | Same as the shutter, or re-filters the loaded negative |
-| **Save** | The same, then asks for a title (defaults to the timestamp) and notes |
-| **Load** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
-| **Bundle** | Zips every image and settings file and hands it to the share sheet |
+| **Load Filter** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
+| **Save Filter** | Captures, then asks for a title (defaults to the timestamp) and notes, and keeps the look with the frame |
+| **Snap** / **Capture Version** | Same as the shutter, or re-filters the loaded negative |
 
-Snap and Save both capture, store, and save to the camera roll — the only
-difference is that Save ends at the naming sheet. Both mark the frame as made
-in the filter screen, so the roll shows where it came from.
+Snap and Save Filter both capture, store, and save to the camera roll — the
+only difference is that Save Filter ends at the naming sheet. Both mark the
+frame as made in the filter screen, so the roll shows where it came from.
 
-These four were a bar across the bottom of the panel. They are pressed once or
-twice a session, and forty sliders wanted the row more than they did.
+These were a bar across the bottom of the panel. They are pressed once or twice
+a session, and forty sliders wanted the row more than they did.
 
 ### Trading preview for panel
 

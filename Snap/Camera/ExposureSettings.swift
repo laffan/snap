@@ -15,8 +15,40 @@
 //
 
 import AVFoundation
+import Combine
 import CoreMedia
 import Foundation
+
+/// What the meter is reading, kept apart from everything else.
+///
+/// `exposureTargetOffset` moves continuously, so anything that republishes on
+/// it republishes several times a second. Held on `CameraModel` that invalidated
+/// the whole camera screen at that rate — the roll included — which is enough
+/// to make a long-press menu flicker and drop the tap that follows it. Here
+/// only the two readouts that want these numbers are watching them.
+final class ExposureMeter: ObservableObject {
+
+    /// How far the current exposure sits from the meter's target, in stops.
+    /// Negative is under.
+    @Published private(set) var offset: Float = 0
+
+    /// What the camera is actually running at, which is where manual starts
+    /// from when it takes over.
+    @Published private(set) var iso: Float = 100
+
+    /// Filtered to what the readout can actually show — a tenth of a stop.
+    /// Anything finer is a redraw nobody can see.
+    func report(offset value: Float) {
+        guard abs(value - offset) >= 0.05 else { return }
+        offset = value
+    }
+
+    /// Same idea at ISO's resolution: the readout is whole numbers.
+    func report(iso value: Float) {
+        guard abs(value - iso) >= 1 else { return }
+        iso = value
+    }
+}
 
 /// How much of the exposure the photographer is deciding.
 enum ExposureMode: String, CaseIterable, Identifiable {
@@ -35,7 +67,9 @@ enum ExposureMode: String, CaseIterable, Identifiable {
         switch self {
         case .auto:    return ""
         case .shutter: return "S"
-        case .manual:  return "M"
+        // Spelled out as the two things it pins, since "M" said nothing about
+        // which knobs stop moving.
+        case .manual:  return "S/I"
         }
     }
 }

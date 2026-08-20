@@ -52,13 +52,12 @@ struct CameraView: View {
                                 isRAWAvailable: camera.isRAWAvailable,
                                 negativeStatus: camera.negativeStatus,
                                 isMonochromeLocked: camera.isMonochromeLocked,
-                                primaryTitle: camera.versionSource == nil ? "Snap" : "Version",
+                                primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
                                 lift: $panelLift,
                                 liftLimit: liftLimit,
                                 onSnap: { primaryAction(titled: false) },
                                 onSave: { primaryAction(titled: true) },
                                 onLoad: { isLoadingLook = true },
-                                onBundle: makeBundle,
                                 onClose: { setEditing(false) }) {
                         roll(selection: camera.versionSource,
                              requiresNegative: true,
@@ -204,19 +203,12 @@ struct CameraView: View {
     /// camera holds this at zero, so it would be a permanent zero teaching
     /// nothing. This is the honest way to answer "am I about to underexpose
     /// this": the preview can't show noise the sensor hasn't produced yet, but
-    /// the meter knows exactly how far off the settings are.
+    /// the meter knows exactly how far off the settings are. Tapping it hands
+    /// the reading back as an Exposure setting — see `ExposureMeterReadout`.
     @ViewBuilder
     private var exposureMeter: some View {
         if viewing == nil, camera.exposureMode != .auto {
-            let offset = camera.exposureOffset
-            let magnitude = abs(offset)
-
-            Text(magnitude < 0.05 ? "0.0 EV" : String(format: "%+.1f EV", offset))
-                .font(.system(size: 10, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(magnitude >= 1.5 ? Color.snapAccent
-                                 : .white.opacity(magnitude >= 0.5 ? 0.8 : 0.45))
-                .animation(.easeOut(duration: 0.15), value: magnitude >= 1.5)
+            ExposureMeterReadout(meter: camera.meter, look: camera.look)
         }
     }
 
@@ -230,10 +222,13 @@ struct CameraView: View {
                 .tracking(1.1)
                 .foregroundStyle(.white.opacity(showsRAW || camera.isPeekingSource ? 0.85 : 0.5))
                 .animation(.easeOut(duration: 0.12), value: indicatorLabel)
+                .padding(.trailing, 6)
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .frame(height: 18)
+        // The inset is 8 here and 6 inside the readout, so both numbers still
+        // sit 14 from the edge while the meter carries a target worth aiming at.
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+        .frame(height: 22)
     }
 
     private func roll(selection: Shot?,
@@ -276,6 +271,19 @@ struct CameraView: View {
     // MARK: - Controls
 
     private var controlRow: some View {
+        VStack(spacing: 12) {
+            // Hidden rather than removed while a saved frame is up: the X takes
+            // the shutter's footprint so the row doesn't shift when the two
+            // swap, and an empty slot above it keeps that promise.
+            MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
+                .opacity(viewing == nil ? 1 : 0)
+                .allowsHitTesting(viewing == nil)
+
+            shutterRow
+        }
+    }
+
+    private var shutterRow: some View {
         ZStack {
             if viewing != nil {
                 CloseButton { viewing = nil }
@@ -294,19 +302,18 @@ struct CameraView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(camera.isCapturing)
-                // Just clear of the shutter's 74pt ring, and well clear of the
+                // Just clear of the shutter's ring, and well clear of the
                 // exposure stepper at the trailing edge.
-                .offset(x: 64)
+                .offset(x: 68)
                 .accessibilityLabel("Capture preview frame")
 
-                // Every camera control lives in here, so a saved frame being
-                // looked at leaves the X on its own: none of it applies to a
-                // photograph that has already been taken.
+                // These sit in the live branch, like B&W above them, so a saved
+                // frame being looked at leaves the X on its own: none of it
+                // applies to a photograph that has already been taken.
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
                         lensPicker
                         exposureModeRow
-                        MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
                     }
 
                     Spacer()
@@ -322,7 +329,7 @@ struct CameraView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// S and M are the only modes that mean anything on a fixed iris — see
+    /// S and S/I are the only modes that mean anything on a fixed iris — see
     /// ExposureSettings. Tapping the lit one drops back to auto.
     private var exposureModeRow: some View {
         HStack(spacing: 2) {
@@ -505,14 +512,6 @@ struct CameraView: View {
         if camera.versionSource?.id == shot.id { camera.endVersioning() }
         store.delete(shot)
     }
-
-    private func makeBundle() {
-        do {
-            share = ShareItem([try store.makeBundle()])
-        } catch {
-            camera.errorMessage = error.localizedDescription
-        }
-    }
 }
 
 /// A rule-of-thirds guide, light enough to compose against without competing
@@ -539,29 +538,92 @@ private struct ThirdsGrid: View {
     }
 }
 
-/// Black-and-white mode. Yellow when on — the only colour the interface uses,
-/// so switched-on always looks the same.
+/// Black-and-white mode, sitting directly above the shutter.
+///
+/// A circle cut by one diagonal, the same size as PS beside it. Switching it on
+/// inverts the whole thing — white disc, black cut — so the state reads from
+/// across the room rather than from three letters.
 private struct MonochromeToggle: View {
 
     @ObservedObject var look: LookModel
     var isLocked: Bool
 
+    private var isOn: Bool { look.profile.blackAndWhite }
+
     var body: some View {
         Button {
             look.profile.blackAndWhite.toggle()
         } label: {
-            Text("B&W")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(look.profile.blackAndWhite ? Color.snapAccent : .white.opacity(0.75))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
+            ZStack {
+                Circle()
+                    .fill(isOn ? Color.white : Color.clear)
+                    .overlay {
+                        Circle().strokeBorder(Color.white.opacity(isOn ? 0 : 0.5), lineWidth: 1)
+                    }
+
+                Diagonal()
+                    .stroke(isOn ? Color.black : Color.white.opacity(0.8),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .padding(10)
+            }
+            .frame(width: 38, height: 38)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(isLocked)
-        .animation(.easeOut(duration: 0.12), value: look.profile.blackAndWhite)
+        .opacity(isLocked ? 0.45 : 1)
+        .animation(.easeOut(duration: 0.12), value: isOn)
         .accessibilityLabel("Black and white")
-        .accessibilityValue(look.profile.blackAndWhite ? "on" : "off")
+        .accessibilityValue(isOn ? "on" : "off")
+    }
+}
+
+/// One line, corner to corner, bottom-left to top-right.
+private struct Diagonal: Shape {
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
+    }
+}
+
+/// The meter reading, and the correction one tap of it makes.
+///
+/// The sign flips on the way through: a frame the meter says is 1.5 stops under
+/// is a frame that wants +1.5 of Exposure. It replaces rather than accumulates,
+/// because the reading is about what the camera is doing and doesn't move when
+/// the develop exposure does — adding would double a correction already made,
+/// and tapping twice should mean the same thing as tapping once.
+private struct ExposureMeterReadout: View {
+
+    @ObservedObject var meter: ExposureMeter
+    /// Written, not watched. The readout has no reason to redraw because a
+    /// slider somewhere else moved.
+    let look: LookModel
+
+    var body: some View {
+        let offset = meter.offset
+        let magnitude = abs(offset)
+
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            look.profile.exposure = min(max(-offset, -5), 5)
+        } label: {
+            Text(magnitude < 0.05 ? "0.0 EV" : String(format: "%+.1f EV", offset))
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(magnitude >= 1.5 ? Color.snapAccent
+                                 : .white.opacity(magnitude >= 0.5 ? 0.8 : 0.45))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.15), value: magnitude >= 1.5)
+        .accessibilityLabel("Exposure meter")
+        .accessibilityHint("Applies the reading to the exposure setting")
     }
 }
 

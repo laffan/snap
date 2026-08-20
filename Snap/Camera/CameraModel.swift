@@ -123,7 +123,7 @@ final class CameraModel: NSObject, ObservableObject {
             guard exposureMode != oldValue else { return }
             // Manual needs a number to hold; borrow whatever the camera had
             // arrived at rather than jumping to an arbitrary one.
-            if exposureMode == .manual, iso == nil { iso = meteredISO }
+            if exposureMode == .manual, iso == nil { iso = meter.iso }
             applyExposure()
         }
     }
@@ -138,15 +138,13 @@ final class CameraModel: NSObject, ObservableObject {
         didSet { applyExposure() }
     }
 
-    /// What the camera is actually running at, for the readout while on AUTO.
-    @Published private(set) var meteredISO: Float = 100
-
     @Published private(set) var shutterSpeeds: [ShutterSpeed] = []
     @Published private(set) var isoOptions: [Float] = []
 
-    /// How far the current exposure sits from the meter's target, in stops.
-    /// Negative is under.
-    @Published private(set) var exposureOffset: Float = 0
+    /// The meter's readings, deliberately not `@Published` here: they move
+    /// several times a second, and republishing the camera that often was
+    /// rebuilding the whole screen under any menu that happened to be open.
+    let meter = ExposureMeter()
 
     private var meterObserver: AnyCancellable?
 
@@ -403,7 +401,7 @@ final class CameraModel: NSObject, ObservableObject {
             .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] offset in
                 guard let self else { return }
-                self.exposureOffset = offset
+                self.meter.report(offset: offset)
                 // Manual holds its own ISO; nothing should be moving it.
                 if self.exposureMode == .shutter { self.correctISO(by: offset) }
             }
@@ -429,7 +427,7 @@ final class CameraModel: NSObject, ObservableObject {
             } catch {
                 return
             }
-            DispatchQueue.main.async { self.meteredISO = target }
+            DispatchQueue.main.async { self.meter.report(iso: target) }
         }
     }
 
@@ -942,9 +940,8 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                                                  sourceMetadata: sourceMetadata,
                                                  context: self.stillContext)
 
-                // The negative is kept in the app's store, where the strip can
-                // share it and the bundle can carry it. Only the graded frame
-                // goes to the camera roll.
+                // The negative is kept in the app's store, where the strip
+                // can share it. Only the graded frame goes to the camera roll.
                 var negative: Data?
                 var xmp: String?
 

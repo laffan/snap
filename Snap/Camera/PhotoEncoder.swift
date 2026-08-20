@@ -6,7 +6,7 @@
 //  EXIF, and reads that look back out.
 //
 //  Every capture carries its settings, whether or not the filter editor was
-//  ever opened — so any file that leaves the app, by camera roll or by bundle,
+//  ever opened — so any file that leaves the app, by camera roll or by share,
 //  is self-describing.
 //
 

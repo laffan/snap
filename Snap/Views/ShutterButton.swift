@@ -22,7 +22,7 @@ struct ShutterButton: View {
         self.action = action
     }
 
-    private let outerDiameter: CGFloat = 74
+    private let outerDiameter: CGFloat = 81
     private let ringWidth: CGFloat = 3
     private let inset: CGFloat = 6
 
@@ -61,7 +61,7 @@ struct CloseButton: View {
 
     var action: () -> Void
 
-    private let diameter: CGFloat = 74
+    private let diameter: CGFloat = 81
 
     var body: some View {
         Button(action: action) {

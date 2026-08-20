@@ -10,10 +10,10 @@ import UniformTypeIdentifiers
 /// Writes finished photos to the camera roll.
 ///
 /// Only the graded JPEG goes here. The negative from a RAW capture stays in
-/// the app's own store, where the strip can share it and the bundle can carry
-/// it, rather than being attached to the asset as an alternate resource —
-/// `PHAssetCreationRequest` will not accept a RAW alternate as raw bytes, and
-/// duplicating tens of megabytes per shot to work around that isn't worth it.
+/// the app's own store, where the strip can share it, rather than being
+/// attached to the asset as an alternate resource — `PHAssetCreationRequest`
+/// will not accept a RAW alternate as raw bytes, and duplicating tens of
+/// megabytes per shot to work around that isn't worth it.
 struct PhotoLibrarySaver {
 
     enum SaveError: LocalizedError {

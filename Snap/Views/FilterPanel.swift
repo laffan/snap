@@ -21,7 +21,8 @@ struct FilterPanel<Strip: View>: View {
     var negativeStatus: CameraModel.NegativeStatus?
     /// True when the loaded negative was shot monochrome, which it stays.
     var isMonochromeLocked: Bool
-    /// "Snap" for a live capture, "Version" when a stored negative is loaded.
+    /// "Snap" for a live capture, "Capture Version" when a stored negative is
+    /// loaded.
     var primaryTitle: String
     /// How far the panel has been pulled up over the preview, and how far it
     /// may go. The handle in the header owns the first and the camera screen
@@ -31,7 +32,6 @@ struct FilterPanel<Strip: View>: View {
     var onSnap: () -> Void
     var onSave: () -> Void
     var onLoad: () -> Void
-    var onBundle: () -> Void
     var onClose: () -> Void
     /// The roll, handed in so the panel doesn't need to know about the store.
     @ViewBuilder var strip: Strip
@@ -102,30 +102,27 @@ struct FilterPanel<Strip: View>: View {
 
     /// Everything the panel can do that isn't a slider. These used to be a bar
     /// across the bottom; the room is better spent on the sliders.
+    ///
+    /// Ordered so the capture — the one that ends a session at the panel — sits
+    /// nearest the thumb, with the two filter errands above it.
     private var actionMenu: some View {
         Menu {
             Button {
-                onSnap()
+                onLoad()
             } label: {
-                Label(primaryTitle, systemImage: "camera")
+                Label("Load Filter", systemImage: "tray.and.arrow.down")
             }
 
             Button {
                 onSave()
             } label: {
-                Label("Save", systemImage: "square.and.pencil")
+                Label("Save Filter", systemImage: "square.and.pencil")
             }
 
             Button {
-                onLoad()
+                onSnap()
             } label: {
-                Label("Load", systemImage: "tray.and.arrow.down")
-            }
-
-            Button {
-                onBundle()
-            } label: {
-                Label("Bundle", systemImage: "archivebox")
+                Label(primaryTitle, systemImage: "camera")
             }
         } label: {
             Image(systemName: "chevron.down")
