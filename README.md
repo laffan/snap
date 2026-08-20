@@ -251,8 +251,9 @@ Ending the session only puts B&W back the way it was if loading the negative
 is what turned it on.
 
 Preview frames have no negative, so they can't be re-filtered — they show
-dimmed in the panel's roll and don't respond to a tap. Their menu still works;
-they can be shared, deleted, or have their settings borrowed.
+dimmed in the panel's roll, don't respond to a tap, and put **Filter** out
+while one is in the viewer. Their menu still works; they can be shared,
+deleted, or have their settings borrowed.
 
 **PS** beside the shutter saves the preview frame itself, skipping the RAW loop
 entirely — no sensor round trip, no demosaic, no full-resolution grade, since
@@ -280,9 +281,12 @@ The roll also lives inside the filter panel. Tapping a frame there loads its
 negative under the sliders in place of the live camera, and moving a slider
 regrades it as you go — the label under the frame reads VERSION while this is
 happening, and holding the frame peeks at the ungraded development the same way
-the saved-frame viewer does. Tapping the same frame again hands the viewer back to the camera.
+the saved-frame viewer does. The loaded frame is outlined in its thumbnail, and
+the strip scrolls to it when the panel opens, since a frame chosen on the way in
+may sit well down the roll. Tapping that same thumbnail again puts the negative
+down: the live preview comes back under the sliders, still open.
 
-**Snap** becomes **Version** while a negative is loaded, and runs the same
+**Snap** becomes **Capture Version** while a negative is loaded, and runs the same
 pipeline the shutter does — develop, crop, grade, encode, square the DNG,
 embed the settings — over the stored sensor data instead of the sensor. The
 result is a new shot in its own right, not an edit of the old one, which is
@@ -300,11 +304,15 @@ with every knob the look exposes, grouped the way Lightroom groups them —
 Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the
 live preview. Double-tap any slider to return it to neutral.
 
-A saved frame that was open in the viewer stays open through the change: Filter
-swaps the controls, not the subject. The sliders won't move it — a saved JPEG
-is finished — so to work on that photograph rather than the next one, tap it in
-the panel's own roll, which loads its negative underneath them and hands the
-viewer over.
+A saved frame that was open in the viewer comes along, as the negative behind
+it rather than as the finished JPEG it was: same square, same subject, but live
+under the sliders and ready to be re-filtered. Filter changes the controls, not
+what is being looked at.
+
+Which is why **Filter** goes out while a preview frame is up. **PS** saves what
+was already on screen and keeps no negative, so there is nothing behind that
+JPEG for the sliders to reach — the button is dim rather than misleading, and
+putting the frame down with the **X** brings it back.
 
 The panel's own actions hang off a menu beside the **Filter** title, listed
 bottom-up so the capture — the one that ends a session at the panel — sits

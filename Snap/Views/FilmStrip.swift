@@ -53,6 +53,22 @@ struct FilmStrip: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            strip
+                // The panel's strip is a second window onto the same roll, and
+                // it opens with a frame already chosen. Scrolling to it is what
+                // makes the outline mean anything.
+                .onAppear { reveal(selection, using: proxy) }
+        }
+        .frame(height: thumbnailEdge)
+        // A shot deleted off the end shouldn't leave the window past the end
+        // of the list.
+        .onChange(of: store.shots.count) { _, count in
+            visibleCount = max(FilmStrip.pageSize, min(visibleCount, max(count, FilmStrip.pageSize)))
+        }
+    }
+
+    private var strip: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(visible) { shot in
@@ -116,11 +132,26 @@ struct FilmStrip: View {
             .padding(.horizontal, 14)
         }
         .scrollIndicators(.hidden)
-        .frame(height: thumbnailEdge)
-        // A shot deleted off the end shouldn't leave the window past the end
-        // of the list.
-        .onChange(of: store.shots.count) { _, count in
-            visibleCount = max(FilmStrip.pageSize, min(visibleCount, max(count, FilmStrip.pageSize)))
+    }
+
+    /// Brings the chosen frame into view, widening the window first if it sits
+    /// past the end of it.
+    ///
+    /// The panel's strip carries its own page count, so a frame picked from the
+    /// camera screen's strip — where more may already have been loaded — can be
+    /// off the end of this one. Asking to scroll to a row that isn't there
+    /// does nothing, so the pages are added first and the scroll waits a turn
+    /// for them to be laid out.
+    private func reveal(_ shot: Shot?, using proxy: ScrollViewProxy) {
+        guard let shot,
+              let index = store.shots.firstIndex(where: { $0.id == shot.id }) else { return }
+
+        if index >= visibleCount {
+            visibleCount = (index / FilmStrip.pageSize + 1) * FilmStrip.pageSize
+        }
+
+        DispatchQueue.main.async {
+            proxy.scrollTo(shot.id, anchor: .center)
         }
     }
 }

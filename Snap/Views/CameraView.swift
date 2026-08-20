@@ -78,6 +78,8 @@ struct CameraView: View {
                     Spacer(minLength: 0)
 
                     textButton("Filter") { setEditing(true) }
+                        .disabled(!canEditFilter)
+                        .opacity(canEditFilter ? 1 : 0.35)
                         .offset(y: -10)
 
                     roll(selection: viewing, onSelect: { viewing = $0 })
@@ -495,17 +497,34 @@ struct CameraView: View {
         max(0, width * 0.45)
     }
 
+    /// Whether Filter can be pressed.
+    ///
+    /// A frame in the viewer comes into the panel as a negative under the
+    /// sliders, so one that has no negative has nowhere to go: a preview frame
+    /// is a finished JPEG and there is nothing left to re-grade. The button is
+    /// out rather than misleading, and putting the frame down brings it back.
+    private var canEditFilter: Bool {
+        guard let viewing else { return true }
+        return store.rawURL(for: viewing) != nil
+    }
+
     private func setEditing(_ editing: Bool) {
         withAnimation(.easeInOut(duration: 0.22)) {
             isEditingFilter = editing
             // The lift belongs to one visit to the panel: the square is whole
             // when it opens and whole again when it closes.
             panelLift = 0
-            // A frame that was being looked at stays up. Filter is a change of
-            // controls, not of subject, and throwing the photograph away to
-            // show a live preview nobody asked for is the wrong half to keep.
-            // Only what versioning borrowed is handed back on the way out.
-            if !editing { camera.endVersioning() }
+
+            if editing {
+                // The frame being looked at comes along, as the negative
+                // behind it rather than as the finished JPEG — otherwise the
+                // sliders would be moving under a photograph they cannot
+                // touch. Same square, same subject, now live.
+                if let viewing { camera.beginVersioning(from: viewing) }
+                viewing = nil
+            } else {
+                camera.endVersioning()
+            }
         }
     }
 
