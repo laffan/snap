@@ -121,9 +121,18 @@ final class CameraModel: NSObject, ObservableObject {
     @Published var exposureMode: ExposureMode = .auto {
         didSet {
             guard exposureMode != oldValue else { return }
-            // Manual needs a number to hold; borrow whatever the camera had
-            // arrived at rather than jumping to an arbitrary one.
-            if exposureMode == .manual, iso == nil { iso = meter.iso }
+            switch exposureMode {
+            case .manual:
+                // Manual needs a number to hold; borrow whatever the camera had
+                // arrived at rather than jumping to an arbitrary one.
+                if iso == nil { iso = meter.iso }
+            case .auto, .shutter:
+                // ISO is the camera's to decide in both of these — auto meters
+                // everything, and shutter priority moves ISO itself. Keeping
+                // the last chosen number would leave the readout lit, claiming
+                // a pin that is no longer there.
+                iso = nil
+            }
             applyExposure()
         }
     }

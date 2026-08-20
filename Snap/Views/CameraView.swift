@@ -295,6 +295,18 @@ struct CameraView: View {
     // MARK: - Controls
 
     private var controlRow: some View {
+        VStack(spacing: 4) {
+            shutterRow
+
+            // Held in place but hidden while a saved frame is up, so nothing
+            // moves when the shutter becomes an X.
+            lensPicker
+                .opacity(viewing == nil ? 1 : 0)
+                .allowsHitTesting(viewing == nil)
+        }
+    }
+
+    private var shutterRow: some View {
         ZStack {
             if viewing != nil {
                 CloseButton { viewing = nil }
@@ -328,12 +340,7 @@ struct CameraView: View {
                 // the X on its own: none of it applies to a photograph that
                 // has already been taken.
                 HStack(alignment: .center) {
-                    // Lenses first, then the modes: which lens is looking is
-                    // decided before how it is metered.
-                    HStack(spacing: 2) {
-                        lensPicker
-                        exposureModeColumn
-                    }
+                    exposureModeColumn
 
                     Spacer()
 
@@ -430,12 +437,13 @@ struct CameraView: View {
         .buttonStyle(.plain)
     }
 
-    /// One dot per lens, widening down the column the way the lenses do. Hidden
-    /// on a single-camera device, where there is nothing to choose.
+    /// One dot per lens, widening left to right the way the lenses do, centred
+    /// under the shutter. Hidden on a single-camera device, where there is
+    /// nothing to choose.
     @ViewBuilder
     private var lensPicker: some View {
         if camera.lenses.count > 1 {
-            VStack(spacing: 0) {
+            HStack(spacing: 0) {
                 ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
                     let diameter = 7 + CGFloat(index) * 3.5
                     let isCurrent = lens == camera.currentLens
@@ -493,13 +501,11 @@ struct CameraView: View {
             // The lift belongs to one visit to the panel: the square is whole
             // when it opens and whole again when it closes.
             panelLift = 0
-            // The viewer is either the live camera, a saved frame, or a
-            // negative being re-filtered — never two at once.
-            if editing {
-                viewing = nil
-            } else {
-                camera.endVersioning()
-            }
+            // A frame that was being looked at stays up. Filter is a change of
+            // controls, not of subject, and throwing the photograph away to
+            // show a live preview nobody asked for is the wrong half to keep.
+            // Only what versioning borrowed is handed back on the way out.
+            if !editing { camera.endVersioning() }
         }
     }
 
@@ -518,6 +524,11 @@ struct CameraView: View {
     /// Tapping a frame while the filter panel is open loads its negative under
     /// the sliders; tapping the same one again lets the camera back through.
     private func selectForVersion(_ shot: Shot) {
+        // The viewer shows one thing at a time: a negative under the sliders
+        // takes it back from a saved frame that was carried in from the camera
+        // screen.
+        viewing = nil
+
         if camera.versionSource?.id == shot.id {
             camera.endVersioning()
         } else {
@@ -586,7 +597,9 @@ private struct MonochromeToggle: View {
 
                 Diagonal()
                     .stroke(isOn ? Color.black : Color.white.opacity(0.8),
-                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                            // The same hairline as the ring around it, and as
+                            // PS's ring across the shutter.
+                            style: StrokeStyle(lineWidth: 1, lineCap: .round))
                     // Just enough inset that the round caps stop at the rim
                     // rather than poking through it.
                     .padding(1)

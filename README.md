@@ -135,14 +135,13 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-Below the frame sit two narrow columns at the left — one dot per lens, one
-letter per exposure mode — then black-and-white, the shutter, and **PS**, each
-the same distance from its neighbour and the two round buttons equally far from
-their own edge of the screen. Exposure sits at the right, and **Filter** is
-centred under all of it. The dots widen down the column the way the lenses do,
-filled for the one in use, and lead the modes because which lens is looking
-comes before how it is metered. Both columns run vertically to leave the row's
-outer thirds to the buttons.
+Below the frame sit a narrow column of exposure modes at the left, then
+black-and-white, the shutter and **PS** across the middle, the two round
+buttons equally far from their own edge of the screen. Exposure sits at the
+right. Under the shutter is a row of dots, one per lens, widening left to right
+the way the lenses do and filled for the one in use; **Filter** is centred
+under all of it. The modes stand in a column rather than a row to leave the
+middle of that row to the buttons.
 
 Exposure steps in whole stops and is the same value as the panel's Exposure
 slider — one setting reachable two ways. Holding the number between the two
@@ -192,7 +191,9 @@ The rows of values appear under the frame for whichever mode is deciding them �
 S shows shutter, S/I shows both — and the offered stops are trimmed to what the
 active lens and format actually accept. The screen holds both rows' worth of
 height whichever mode is lit, so choosing one reveals a row rather than pushing
-the frame, the shutter and the roll down to make space. ISO also has a readout
+the frame, the shutter and the roll down to make space. Leaving S/I hands ISO
+back: A meters it and S moves it, so keeping the last number chosen would leave
+the readout lit over a pin that no longer exists. ISO also has a readout
 under the exposure stepper, with AUTO at the top of its list; it and the S/I row
 edit the same value.
 
@@ -298,6 +299,12 @@ only that one costs a re-develop.
 with every knob the look exposes, grouped the way Lightroom groups them —
 Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the
 live preview. Double-tap any slider to return it to neutral.
+
+A saved frame that was open in the viewer stays open through the change: Filter
+swaps the controls, not the subject. The sliders won't move it — a saved JPEG
+is finished — so to work on that photograph rather than the next one, tap it in
+the panel's own roll, which loads its negative underneath them and hands the
+viewer over.
 
 The panel's own actions hang off a menu beside the **Filter** title, listed
 bottom-up so the capture — the one that ends a session at the panel — sits
