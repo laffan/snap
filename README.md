@@ -329,6 +329,13 @@ The extension ships inside the app, so there is nothing extra to install — its
 bundle identifier is the app's with `.widgets` on the end, and it has to share
 the same signing team.
 
+Its `Info.plist` lives in `Config/`, not beside the sources. A
+`PBXFileSystemSynchronizedRootGroup` sweeps in *every* file under its folder,
+so a plist left in `SnapWidgets/` gets copied as a bundle resource as well as
+processed as the target's Info.plist — two build tasks writing the same output.
+Keeping it outside the synchronised folder is what stops that; the same applies
+to anything else added there that isn't source.
+
 ## Deliberately not here
 
 Front camera, flash, zoom, focus tap, grid. The capture screen is a preview, a
