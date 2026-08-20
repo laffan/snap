@@ -135,13 +135,19 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-Below the frame sit the lens dots and the exposure modes stacked down the
-left, the shutter centred with black-and-white directly above it, exposure on
-the right, and **Filter** centred under all of it. The dots widen left to right
-the way the lenses do, filled for the one in use, and sit above the modes
-because which lens is looking comes before how it is metered; exposure steps in
-whole stops and is the same value as the panel's Exposure slider — one setting
-reachable two ways. It is a develop setting rather than a camera one, so it
+Below the frame sit two narrow columns at the left — one dot per lens, one
+letter per exposure mode — then black-and-white, the shutter, and **PS**, each
+the same distance from its neighbour and the two round buttons equally far from
+their own edge of the screen. Exposure sits at the right, and **Filter** is
+centred under all of it. The dots widen down the column the way the lenses do,
+filled for the one in use, and lead the modes because which lens is looking
+comes before how it is metered. Both columns run vertically to leave the row's
+outer thirds to the buttons.
+
+Exposure steps in whole stops and is the same value as the panel's Exposure
+slider — one setting reachable two ways. Holding the number between the two
+steps for half a second clears it back to zero, which beats nine taps home from
+five stops out. It is a develop setting rather than a camera one, so it
 re-applies when a negative is re-filtered and travels to Lightroom as
 `crs:Exposure2012`.
 
@@ -177,11 +183,18 @@ units ISO scales in.
 shutter and ISO. Selecting it borrows whatever ISO the camera had arrived at
 rather than jumping to an arbitrary number.
 
-Tapping the lit mode returns to auto. The rows of values appear under the frame
-for whichever mode is deciding them — S shows shutter, S/I shows both — and the
-offered stops are trimmed to what the active lens and format actually accept.
-ISO also has a readout under the exposure stepper, with AUTO at the top of its
-list; it and the S/I row edit the same value.
+**A** hands both back. It is a button like the other two rather than the state
+left over when nothing is lit — leaving auto by tapping the lit mode again was
+a move you had to be told about, and it made what the column meant depend on
+what had been pressed before it.
+
+The rows of values appear under the frame for whichever mode is deciding them —
+S shows shutter, S/I shows both — and the offered stops are trimmed to what the
+active lens and format actually accept. The screen holds both rows' worth of
+height whichever mode is lit, so choosing one reveals a row rather than pushing
+the frame, the shutter and the roll down to make space. ISO also has a readout
+under the exposure stepper, with AUTO at the top of its list; it and the S/I row
+edit the same value.
 
 ### The meter, and what the preview can't tell you
 
@@ -246,10 +259,11 @@ the graded frame is already on screen. It is as close to zero shutter lag as
 the app gets, at the cost of coming out at preview resolution with no negative
 behind it.
 
-**The circle with a diagonal through it**, directly above the shutter, renders
-the frame monochrome; switching it on inverts it to a white disc with a black
-cut. The conversion happens at the *end* of the grade rather than the start —
-so the colour mixer still shapes it, the way a black-and-white mixer does:
+**The circle with a diagonal through it**, to the left of the shutter as PS is
+to its right, renders the frame monochrome; switching it on inverts it to a
+white disc with a black cut. The conversion happens at the *end* of the grade
+rather than the start — so the colour mixer still shapes it, the way a
+black-and-white mixer does:
 desaturating a band changes that band's luminance. The negative keeps its
 colour data, since this is how the frame is rendered rather than what was
 recorded, but peeking at it behind a monochrome look shows it desaturated so

@@ -33,6 +33,15 @@ struct CameraView: View {
 
     private var store: ShotStore { camera.store }
 
+    /// One cell of the lens column and of the mode column beside it, so the two
+    /// stay level whatever the font does.
+    private static let controlCellHeight: CGFloat = 30
+
+    /// The mode column is the tallest thing in the control row: one cell per
+    /// mode.
+    private static let controlColumnHeight =
+        CameraView.controlCellHeight * CGFloat(ExposureMode.allCases.count)
+
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
@@ -243,12 +252,26 @@ struct CameraView: View {
                   requiresNegative: requiresNegative)
     }
 
+    /// How much room the value rows hold open.
+    ///
+    /// Both rows' worth on the camera screen, whichever mode is lit. The filter
+    /// panel gets whatever the rows actually need instead: the mode buttons
+    /// aren't reachable from there, so nothing can appear that would push
+    /// anything, and the sliders would rather have the height.
+    private var reservedRowHeight: CGFloat? {
+        isEditingFilter ? nil : ValueRowMetrics.height * 2
+    }
+
     /// Shutter and ISO, shown only for the mode that is actually deciding
-    /// them. Manual decides both, so it shows both.
-    @ViewBuilder
+    /// them. S/I decides both, so it shows both.
+    ///
+    /// The block holds the height of both rows whether or not either is in it.
+    /// Switching mode should reveal a row, not shove the shutter and the roll
+    /// down the screen — the frame above is the thing being composed, and it
+    /// shouldn't move because the exposure is being talked about.
     private var exposureRows: some View {
-        if viewing == nil, camera.exposureMode != .auto {
-            VStack(spacing: 0) {
+        VStack(spacing: 0) {
+            if viewing == nil, camera.exposureMode != .auto {
                 ValueRow(label: "S",
                          values: camera.shutterSpeeds,
                          title: { $0.label },
@@ -264,26 +287,14 @@ struct CameraView: View {
                              ))
                 }
             }
-            .padding(.top, 2)
         }
+        .frame(height: reservedRowHeight, alignment: .top)
+        .padding(.top, 2)
     }
 
     // MARK: - Controls
 
     private var controlRow: some View {
-        VStack(spacing: 12) {
-            // Hidden rather than removed while a saved frame is up: the X takes
-            // the shutter's footprint so the row doesn't shift when the two
-            // swap, and an empty slot above it keeps that promise.
-            MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
-                .opacity(viewing == nil ? 1 : 0)
-                .allowsHitTesting(viewing == nil)
-
-            shutterRow
-        }
-    }
-
-    private var shutterRow: some View {
         ZStack {
             if viewing != nil {
                 CloseButton { viewing = nil }
@@ -307,13 +318,21 @@ struct CameraView: View {
                 .offset(x: 68)
                 .accessibilityLabel("Capture preview frame")
 
-                // These sit in the live branch, like B&W above them, so a saved
-                // frame being looked at leaves the X on its own: none of it
-                // applies to a photograph that has already been taken.
+                // The same distance out on the other side, so the two round
+                // buttons sit level and equally far from their own edge.
+                MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
+                    .offset(x: -68)
+
+                // These sit in the live branch, like the two round buttons
+                // beside the shutter, so a saved frame being looked at leaves
+                // the X on its own: none of it applies to a photograph that
+                // has already been taken.
                 HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    // Lenses first, then the modes: which lens is looking is
+                    // decided before how it is metered.
+                    HStack(spacing: 2) {
                         lensPicker
-                        exposureModeRow
+                        exposureModeColumn
                     }
 
                     Spacer()
@@ -326,31 +345,35 @@ struct CameraView: View {
                 .padding(.horizontal, 14)
             }
         }
-        .frame(maxWidth: .infinity)
+        // Held to the height of the mode column so that swapping the shutter
+        // for the X, which is shorter than both, doesn't move the row.
+        .frame(maxWidth: .infinity, minHeight: CameraView.controlColumnHeight)
     }
 
-    /// S and S/I are the only modes that mean anything on a fixed iris — see
-    /// ExposureSettings. Tapping the lit one drops back to auto.
-    private var exposureModeRow: some View {
-        HStack(spacing: 2) {
-            ForEach([ExposureMode.shutter, .manual]) { mode in
+    /// A, S and S/I — the three that mean anything on a fixed iris, see
+    /// ExposureSettings. A is a mode like the others rather than the absence of
+    /// one: leaving by tapping the lit button was a hidden move, and it made
+    /// the row's state depend on what had been tapped before.
+    ///
+    /// Stacked rather than laid across, which keeps this column narrow enough
+    /// to leave the row's outer thirds to the two round buttons.
+    private var exposureModeColumn: some View {
+        VStack(spacing: 0) {
+            ForEach(ExposureMode.allCases) { mode in
                 Button {
-                    // Tapping the lit mode drops back to auto.
-                    camera.exposureMode = camera.exposureMode == mode ? .auto : mode
+                    camera.exposureMode = mode
                 } label: {
                     Text(mode.label)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(camera.exposureMode == mode ? Color.snapAccent : .white.opacity(0.75))
-                        .frame(width: 26)
-                        .padding(.vertical, 8)
+                        // A fixed cell, so the column's height is a number this
+                        // file knows rather than whatever the font decides.
+                        .frame(width: 30, height: CameraView.controlCellHeight)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        // Enough of an inset that the letters line up under the lens dots and
-        // over B&W, both of which carry padding of their own.
-        .padding(.leading, 5)
         .animation(.easeOut(duration: 0.12), value: camera.exposureMode)
     }
 
@@ -407,12 +430,12 @@ struct CameraView: View {
         .buttonStyle(.plain)
     }
 
-    /// One dot per lens, widening left to right the way the lenses do. Hidden
+    /// One dot per lens, widening down the column the way the lenses do. Hidden
     /// on a single-camera device, where there is nothing to choose.
     @ViewBuilder
     private var lensPicker: some View {
         if camera.lenses.count > 1 {
-            HStack(spacing: 0) {
+            VStack(spacing: 0) {
                 ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
                     let diameter = 7 + CGFloat(index) * 3.5
                     let isCurrent = lens == camera.currentLens
@@ -429,14 +452,13 @@ struct CameraView: View {
                             .frame(width: diameter, height: diameter)
                             // The dot is far too small to aim at; the tap
                             // target isn't.
-                            .frame(width: 26, height: 30)
+                            .frame(width: 26, height: CameraView.controlCellHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(lens.name)
                 }
             }
-            .padding(.leading, 4)
         }
     }
 
@@ -538,10 +560,11 @@ private struct ThirdsGrid: View {
     }
 }
 
-/// Black-and-white mode, sitting directly above the shutter.
+/// Black-and-white mode, sitting to the left of the shutter as PS sits to its
+/// right.
 ///
-/// A circle cut by one diagonal, the same size as PS beside it. Switching it on
-/// inverts the whole thing — white disc, black cut — so the state reads from
+/// A circle cut rim to rim by one diagonal, the same size as PS. Switching it
+/// on inverts the whole thing — white disc, black cut — so the state reads from
 /// across the room rather than from three letters.
 private struct MonochromeToggle: View {
 
@@ -564,7 +587,9 @@ private struct MonochromeToggle: View {
                 Diagonal()
                     .stroke(isOn ? Color.black : Color.white.opacity(0.8),
                             style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                    .padding(10)
+                    // Just enough inset that the round caps stop at the rim
+                    // rather than poking through it.
+                    .padding(1)
             }
             .frame(width: 38, height: 38)
             .contentShape(Circle())
@@ -578,13 +603,16 @@ private struct MonochromeToggle: View {
     }
 }
 
-/// One line, corner to corner, bottom-left to top-right.
+/// One line across the circle that shares its bounds, bottom-left to top-right,
+/// landing on the rim at both ends rather than on the corners of the square.
 private struct Diagonal: Shape {
 
     func path(in rect: CGRect) -> Path {
+        // A 45° line meets a circle of radius r at r/√2 in each direction.
+        let reach = min(rect.width, rect.height) / 2 / CGFloat(2).squareRoot()
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.move(to: CGPoint(x: rect.midX - reach, y: rect.midY + reach))
+        path.addLine(to: CGPoint(x: rect.midX + reach, y: rect.midY - reach))
         return path
     }
 }

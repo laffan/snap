@@ -7,6 +7,12 @@
 
 import SwiftUI
 
+/// Published so the camera screen can hold room for rows that aren't showing
+/// yet without guessing at the number.
+enum ValueRowMetrics {
+    static let height: CGFloat = 30
+}
+
 struct ValueRow<Value: Identifiable & Equatable>: View {
 
     let label: String
@@ -45,7 +51,7 @@ struct ValueRow<Value: Identifiable & Equatable>: View {
             .scrollIndicators(.hidden)
         }
         .padding(.horizontal, 14)
-        .frame(height: 30)
+        .frame(height: ValueRowMetrics.height)
     }
 }
 

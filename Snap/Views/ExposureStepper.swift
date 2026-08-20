@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ExposureStepper: View {
 
@@ -31,11 +32,20 @@ struct ExposureStepper: View {
                 value = min(range.upperBound, value.rounded(.down) + 1)
             }
 
+            // Holding the number between the two steps clears it. Stepping
+            // back to zero from five stops out is nine taps; this is one, and
+            // it lands on the same value the panel's slider reads.
             Text(label)
                 .font(.system(size: 13, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(value == 0 ? .white.opacity(0.45) : .white)
-                .frame(minWidth: 26)
+                .frame(minWidth: 26, minHeight: 24)
+                .contentShape(Rectangle())
+                .onLongPressGesture(minimumDuration: 0.5) {
+                    guard value != 0 else { return }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    value = 0
+                }
 
             step("minus", enabled: value > range.lowerBound) {
                 value = max(range.lowerBound, value.rounded(.up) - 1)
@@ -44,6 +54,7 @@ struct ExposureStepper: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Exposure compensation")
         .accessibilityValue(label == "0" ? "zero" : label)
+        .accessibilityAction(named: "Reset to zero") { value = 0 }
     }
 
     private func step(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {

@@ -61,11 +61,11 @@ enum ExposureMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// The letter on the button. Auto has none — it is the state with nothing
-    /// lit.
+    /// The letter on the button. Auto has one of its own: it is a mode to be
+    /// chosen, not the state left over when nothing is lit.
     var label: String {
         switch self {
-        case .auto:    return ""
+        case .auto:    return "A"
         case .shutter: return "S"
         // Spelled out as the two things it pins, since "M" said nothing about
         // which knobs stop moving.
