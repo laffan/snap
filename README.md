@@ -307,6 +307,28 @@ annotates it *"shift toward aqua/blue"*, and in Lightroom a negative green hue
 moves toward yellow. The teal-shifted foliage is the defining half of this
 look, so the stated intent wins. See the comment in `PositiveFilmProfile.swift`.
 
+## Lock screen
+
+`SnapWidgets` is a widget extension carrying two ways onto the lock screen,
+because iOS grew a second one:
+
+- **A circular accessory widget** that sits under the clock. Long-press the
+  lock screen ▸ Customise ▸ Lock Screen, tap the row under the time, and add
+  Snap. Works from iOS 16.
+- **A control**, from iOS 18, which can take the place of the camera or
+  flashlight button in the bottom corners — the fastest route from a dark
+  screen to a photograph. Long-press the lock screen ▸ Customise ▸ Lock
+  Screen, tap the button you want to replace, and pick Snap. It also appears
+  in Control Centre and can be bound to the Action Button.
+
+Neither does anything but launch the app. The control's `OpenSnapIntent` has
+no body: `openAppWhenRun` is the whole mechanism, carrying the tap from the
+extension to the app.
+
+The extension ships inside the app, so there is nothing extra to install — its
+bundle identifier is the app's with `.widgets` on the end, and it has to share
+the same signing team.
+
 ## Deliberately not here
 
 Front camera, flash, zoom, focus tap, grid. The capture screen is a preview, a
