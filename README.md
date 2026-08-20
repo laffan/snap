@@ -43,7 +43,7 @@ resolution.
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
 | `Library/ShotStore.swift` | Every shot on disk, and the zip bundle |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
-| `Views/FilterPanel.swift` | The slider editor and its action bar |
+| `Views/FilterPanel.swift` | The slider editor, its menu, and the handle that resizes it |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
 
 ## RAW
@@ -135,26 +135,36 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-Below the frame sit **Filter**, a row of dots for the lenses, and **B&W** on
-the left, the shutter centred, and exposure on the right. The dots widen left
-to right the way the lenses do, filled for the one in use; exposure steps in
-whole stops
+Below the frame sit the lens dots, the exposure modes and **B&W** stacked down
+the left, the shutter centred, and exposure on the right, with **Filter**
+centred under all of it. The dots widen left to right the way the lenses do,
+filled for the one in use, and sit above the modes because which lens is
+looking comes before how it is metered; exposure steps in whole stops
 and is the same value as the panel's Exposure slider — one setting reachable
 two ways. It is a develop setting rather than a camera one, so it re-applies
 when a negative is re-filtered and travels to Lightroom as `crs:Exposure2012`.
 
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
-that returns to the live preview. Long-press for **Use Filter Data** (puts that
-shot's settings back on the sliders), **Share JPEG**, **Share RAW** (only when
-the capture was RAW), or **Delete Image**.
+that returns to the live preview. The camera controls go with the exposure
+stepper while a saved frame is up: lens, mode and B&W all decide how the *next*
+photograph is taken, and none of them applies to one that already exists.
+Long-press for **Use Filter Data** (puts that shot's settings back on the
+sliders), **Share JPEG**, **Share RAW** (only when the capture was RAW), or
+**Delete Image**.
+
+Two kinds of frame are marked in the corner of their thumbnail: a dot for one
+taken with **PS**, and a square for one made in the filter screen — a
+re-filtered negative, or a capture from the panel's own menu. Everything else
+came off the shutter.
 
 ## Exposure
 
 Two of the three classic modes mean something on a phone. An iPhone lens has a
 fixed iris — `AVCaptureDevice.lensAperture` is read-only because there is
-nothing to move — so aperture priority would be indistinguishable from auto.
-The f-number is shown where that button would be, as a readout rather than a
-control.
+nothing to move — so aperture priority would be indistinguishable from auto,
+and nothing sits where that button would be. The f-number was shown there for a
+while as a readout; a number that never changes doesn't earn a place among
+controls that do.
 
 **S** pins the shutter and lets ISO follow. iOS has no shutter-priority mode of
 its own: `setExposureModeCustom(duration:iso:)` fixes both. So priority is
@@ -252,14 +262,14 @@ only that one costs a re-develop.
 
 ## The filter editor
 
-**Filter** (bottom right) replaces the lower half of the screen with every knob
-the look exposes, grouped the way Lightroom groups them — Basic, Tone Curve,
-Color Mixer, Calibration, RAW. Moving a slider regrades the live preview.
-Double-tap any slider to return it to neutral.
+**Filter**, centred under the shutter, replaces the lower half of the screen
+with every knob the look exposes, grouped the way Lightroom groups them —
+Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the
+live preview. Double-tap any slider to return it to neutral.
 
-A sticky bar sits under the sliders:
+The panel's own actions hang off a menu beside the **Filter** title:
 
-| Button | Does |
+| Item | Does |
 | --- | --- |
 | **Snap** / **Version** | Same as the shutter, or re-filters the loaded negative |
 | **Save** | The same, then asks for a title (defaults to the timestamp) and notes |
@@ -267,7 +277,28 @@ A sticky bar sits under the sliders:
 | **Bundle** | Zips every image and settings file and hands it to the share sheet |
 
 Snap and Save both capture, store, and save to the camera roll — the only
-difference is that Save ends at the naming sheet.
+difference is that Save ends at the naming sheet. Both mark the frame as made
+in the filter screen, so the roll shows where it came from.
+
+These four were a bar across the bottom of the panel. They are pressed once or
+twice a session, and forty sliders wanted the row more than they did.
+
+### Trading preview for panel
+
+A handle sits at the centre of the panel's header. Dragging it up pulls the
+panel over the preview, and the square gives up exactly what the panel gains,
+which keeps the frame square while it shrinks. The drag stops at 45% of the
+width — past that the viewfinder has stopped being one. Closing the panel hands
+the whole square back.
+
+### Copy Adjustments
+
+At the foot of the sliders, **Copy Adjustments** puts everything that has moved
+off the built-in look on the clipboard, one setting per line, each named the way
+its slider is. Settings still sitting at their default are left out, so what
+lands in a note is the *difference* — which is what a look is, and what would be
+pasted back into `PositiveFilmProfile.swift` to make it the new default. The
+button reads Nothing Adjusted while there is no difference to copy.
 
 ### Keeping sliders responsive
 

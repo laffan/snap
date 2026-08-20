@@ -6,9 +6,9 @@
 //
 //  Aperture isn't one of them. An iPhone lens has a fixed iris —
 //  `AVCaptureDevice.lensAperture` is read-only because there is nothing to
-//  move — so aperture priority would be indistinguishable from auto. The
-//  f-number is worth showing, since it sets what the other two have to work
-//  around, but it is a readout rather than a control.
+//  move — so aperture priority would be indistinguishable from auto, and there
+//  is no f-number worth putting on screen: one lens has one, and it never
+//  changes.
 //
 //  Shutter and ISO are real: `setExposureModeCustom(duration:iso:)` takes
 //  both.

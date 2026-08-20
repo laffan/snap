@@ -236,3 +236,58 @@ extension PositiveFilmProfile {
         }
     }
 }
+
+// MARK: - What has been changed
+
+extension PositiveFilmProfile {
+
+    /// Every setting that has moved off the built-in look, one line each, in
+    /// the order the panel lists them. Empty when nothing has moved.
+    ///
+    /// Labels match the sliders and the numbers are formatted the way the
+    /// sliders format them, so a copied line reads as the row it came from.
+    /// The two groups that share colour names are spelled out — Calibration
+    /// Red is not the mixer's Red.
+    var adjustments: [String] {
+        let base = PositiveFilmProfile()
+        var lines: [String] = []
+
+        func compare(_ label: String, _ value: Float, _ reference: Float, decimals: Int = 0) {
+            guard value != reference else { return }
+            let formatted = String(format: "%.\(decimals)f", value)
+            lines.append("\(label): \(formatted)")
+        }
+
+        compare("Exposure", exposure, base.exposure, decimals: 2)
+        compare("Contrast", contrast, base.contrast)
+        compare("Highlights", highlights, base.highlights)
+        compare("Shadows", shadows, base.shadows)
+        compare("Blacks", blacks, base.blacks)
+        compare("Clarity", clarity, base.clarity)
+        compare("Sharpness", sharpness, base.sharpness)
+        compare("Vibrance", vibrance, base.vibrance)
+        if blackAndWhite != base.blackAndWhite {
+            lines.append("Black & White: \(blackAndWhite ? "on" : "off")")
+        }
+
+        compare("S-Curve", toneCurveS, base.toneCurveS)
+        compare("Black Lift", blackLift, base.blackLift, decimals: 3)
+
+        for band in bands {
+            guard let reference = base.bands.first(where: { $0.name == band.name }) else { continue }
+            compare("\(band.name) Hue", band.hue, reference.hue)
+            compare("\(band.name) Saturation", band.saturation, reference.saturation)
+        }
+
+        for (name, primary, reference) in [("Red", redPrimary, base.redPrimary),
+                                           ("Green", greenPrimary, base.greenPrimary),
+                                           ("Blue", bluePrimary, base.bluePrimary)] {
+            compare("Calibration \(name) Hue", primary.hue, reference.hue)
+            compare("Calibration \(name) Saturation", primary.saturation, reference.saturation)
+        }
+
+        compare("Apple Tone Curve", rawBoost, base.rawBoost)
+
+        return lines
+    }
+}

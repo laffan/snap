@@ -8,6 +8,19 @@
 import Foundation
 
 struct Shot: Codable, Identifiable, Equatable {
+
+    /// How the frame came about. The strip marks the two that didn't come from
+    /// an ordinary shutter press.
+    enum Origin: String, Codable {
+        /// The shutter button.
+        case camera
+        /// PS — the preview frame itself, saved as it stood.
+        case preview
+        /// Made in the filter screen: a re-filtered negative, or a capture
+        /// taken from the panel's own menu.
+        case filter
+    }
+
     var id: UUID
     /// Empty until the shot is named. The strip and the load list fall back to
     /// the timestamp.
@@ -21,6 +34,7 @@ struct Shot: Codable, Identifiable, Equatable {
     var rawFileName: String?
     /// File name of the Camera Raw sidecar that travels with the negative.
     var xmpFileName: String?
+    var origin: Origin
     var profile: PositiveFilmProfile
 
     init(id: UUID = UUID(),
@@ -30,6 +44,7 @@ struct Shot: Codable, Identifiable, Equatable {
          imageFileName: String,
          rawFileName: String? = nil,
          xmpFileName: String? = nil,
+         origin: Origin = .camera,
          profile: PositiveFilmProfile) {
         self.id = id
         self.title = title
@@ -38,6 +53,7 @@ struct Shot: Codable, Identifiable, Equatable {
         self.imageFileName = imageFileName
         self.rawFileName = rawFileName
         self.xmpFileName = xmpFileName
+        self.origin = origin
         self.profile = profile
     }
 
@@ -50,5 +66,35 @@ struct Shot: Codable, Identifiable, Equatable {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)
+    }
+}
+
+// MARK: - Lenient decoding
+
+/// Hand-written for the same reason the profile's is: a sidecar written before
+/// `origin` existed still has to load, and a synthesised decode would throw on
+/// the missing key and take the shot with it. Those shots read as ordinary
+/// captures.
+///
+/// In an extension so the memberwise initialiser above survives.
+extension Shot {
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, notes, createdAt
+        case imageFileName, rawFileName, xmpFileName
+        case origin, profile
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try container.decode(UUID.self, forKey: .id),
+                  title: try container.decode(String.self, forKey: .title),
+                  notes: try container.decode(String.self, forKey: .notes),
+                  createdAt: try container.decode(Date.self, forKey: .createdAt),
+                  imageFileName: try container.decode(String.self, forKey: .imageFileName),
+                  rawFileName: try container.decodeIfPresent(String.self, forKey: .rawFileName),
+                  xmpFileName: try container.decodeIfPresent(String.self, forKey: .xmpFileName),
+                  origin: ((try? container.decodeIfPresent(Origin.self, forKey: .origin)) ?? nil) ?? .camera,
+                  profile: try container.decode(PositiveFilmProfile.self, forKey: .profile))
     }
 }

@@ -27,13 +27,22 @@ struct CameraView: View {
     /// Set when a hold pinned focus, so the touch ending doesn't immediately
     /// read as the tap that releases it.
     @State private var didLockFocus = false
+    /// How far the filter panel has been pulled up over the preview, in
+    /// points. The square gives up exactly this much.
+    @State private var panelLift: CGFloat = 0
 
     private var store: ShotStore { camera.store }
 
     var body: some View {
         GeometryReader { geometry in
+            let width = geometry.size.width
+            let liftLimit = CameraView.liftLimit(for: width)
+            // Clamped on the way out as well as on the way in, so a width that
+            // changed under a lift can't leave the square oversubscribed.
+            let lift = isEditingFilter ? min(panelLift, liftLimit) : 0
+
             VStack(spacing: 0) {
-                viewer(edge: geometry.size.width)
+                viewer(edge: width - lift)
                 sourceIndicator
                 exposureRows
 
@@ -44,6 +53,8 @@ struct CameraView: View {
                                 negativeStatus: camera.negativeStatus,
                                 isMonochromeLocked: camera.isMonochromeLocked,
                                 primaryTitle: camera.versionSource == nil ? "Snap" : "Version",
+                                lift: $panelLift,
+                                liftLimit: liftLimit,
                                 onSnap: { primaryAction(titled: false) },
                                 onSave: { primaryAction(titled: true) },
                                 onLoad: { isLoadingLook = true },
@@ -58,11 +69,8 @@ struct CameraView: View {
                     controlRow
                     Spacer(minLength: 0)
 
-                    HStack {
-                        textButton("Filter") { setEditing(true) }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 6)
+                    textButton("Filter") { setEditing(true) }
+                        .offset(y: -10)
 
                     roll(selection: viewing, onSelect: { viewing = $0 })
                         .padding(.bottom, 10)
@@ -290,43 +298,34 @@ struct CameraView: View {
                 // exposure stepper at the trailing edge.
                 .offset(x: 64)
                 .accessibilityLabel("Capture preview frame")
-            }
 
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    exposureModeRow
-                    lensPicker
-                    MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
-                }
+                // Every camera control lives in here, so a saved frame being
+                // looked at leaves the X on its own: none of it applies to a
+                // photograph that has already been taken.
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        lensPicker
+                        exposureModeRow
+                        MonochromeToggle(look: camera.look, isLocked: camera.isMonochromeLocked)
+                    }
 
-                Spacer()
+                    Spacer()
 
-                if viewing == nil {
                     VStack(spacing: 4) {
                         ExposureControl(look: camera.look)
                         isoPicker
                     }
                 }
+                .padding(.horizontal, 14)
             }
-            .padding(.horizontal, 14)
         }
         .frame(maxWidth: .infinity)
     }
 
-    /// The f-number sits where an aperture-priority button would, because the
-    /// lens has one aperture and nothing to prioritise. S and M are the modes
-    /// that mean something here.
+    /// S and M are the only modes that mean anything on a fixed iris — see
+    /// ExposureSettings. Tapping the lit one drops back to auto.
     private var exposureModeRow: some View {
         HStack(spacing: 2) {
-            if let aperture = camera.aperture {
-                Text(String(format: "\u{0192}%.1f", aperture))
-                    .font(.system(size: 12, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.35))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-            }
-
             ForEach([ExposureMode.shutter, .manual]) { mode in
                 Button {
                     // Tapping the lit mode drops back to auto.
@@ -342,6 +341,9 @@ struct CameraView: View {
                 .buttonStyle(.plain)
             }
         }
+        // Enough of an inset that the letters line up under the lens dots and
+        // over B&W, both of which carry padding of their own.
+        .padding(.leading, 5)
         .animation(.easeOut(duration: 0.12), value: camera.exposureMode)
     }
 
@@ -427,7 +429,7 @@ struct CameraView: View {
                     .accessibilityLabel(lens.name)
                 }
             }
-            .padding(.leading, 8)
+            .padding(.leading, 4)
         }
     }
 
@@ -450,9 +452,18 @@ struct CameraView: View {
 
     // MARK: - Actions
 
+    /// How far the panel may be pulled up. Past this the square stops being a
+    /// viewfinder, so the drag stops here rather than letting it go.
+    private static func liftLimit(for width: CGFloat) -> CGFloat {
+        max(0, width * 0.45)
+    }
+
     private func setEditing(_ editing: Bool) {
         withAnimation(.easeInOut(duration: 0.22)) {
             isEditingFilter = editing
+            // The lift belongs to one visit to the panel: the square is whole
+            // when it opens and whole again when it closes.
+            panelLift = 0
             // The viewer is either the live camera, a saved frame, or a
             // negative being re-filtered — never two at once.
             if editing {
@@ -464,11 +475,12 @@ struct CameraView: View {
     }
 
     /// Snap and Save both go through here: they take a live frame normally,
-    /// and re-filter the loaded negative when there is one, so the action bar
-    /// always acts on whatever the viewer is showing.
+    /// and re-filter the loaded negative when there is one, so the panel's
+    /// menu always acts on whatever the viewer is showing. Either way the
+    /// frame is marked as having come out of the filter screen.
     private func primaryAction(titled: Bool) {
         if camera.versionSource == nil {
-            camera.capture(titled: titled)
+            camera.capture(titled: titled, origin: .filter)
         } else {
             camera.captureVersion(titled: titled)
         }

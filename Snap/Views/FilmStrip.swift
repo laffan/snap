@@ -134,6 +134,29 @@ private struct Thumbnail: View {
 
     @State private var image: UIImage? = nil
 
+    /// Marks the frames the shutter didn't take: a dot for a preview frame,
+    /// a square for one made in the filter screen. The drop shadow is what
+    /// keeps white legible against a blown-out corner.
+    @ViewBuilder
+    private var originMark: some View {
+        switch shot.origin {
+        case .camera:
+            EmptyView()
+        case .preview:
+            mark(Circle())
+        case .filter:
+            mark(Rectangle())
+        }
+    }
+
+    private func mark(_ shape: some Shape) -> some View {
+        shape
+            .fill(Color.white)
+            .frame(width: 5, height: 5)
+            .shadow(color: .black.opacity(0.5), radius: 1)
+            .padding(5)
+    }
+
     var body: some View {
         ZStack {
             if let image {
@@ -150,6 +173,7 @@ private struct Thumbnail: View {
             RoundedRectangle(cornerRadius: 4)
                 .strokeBorder(Color.white, lineWidth: isSelected ? 2 : 0)
         }
+        .overlay(alignment: .topTrailing) { originMark }
         .contentShape(RoundedRectangle(cornerRadius: 4))
         .task(id: shot.id) {
             guard image == nil else { return }

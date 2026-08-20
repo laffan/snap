@@ -144,10 +144,6 @@ final class CameraModel: NSObject, ObservableObject {
     @Published private(set) var shutterSpeeds: [ShutterSpeed] = []
     @Published private(set) var isoOptions: [Float] = []
 
-    /// The lens's fixed f-number. A readout, not a control — see
-    /// ExposureSettings.
-    @Published private(set) var aperture: Float?
-
     /// How far the current exposure sits from the meter's target, in stops.
     /// Negative is under.
     @Published private(set) var exposureOffset: Float = 0
@@ -172,6 +168,12 @@ final class CameraModel: NSObject, ObservableObject {
     /// The profile as it stood when the shutter fired, so later slider moves
     /// can't change what gets written.
     private var capturedProfile = PositiveFilmProfile()
+
+    /// Where the in-flight capture was started from, held alongside the
+    /// profile for the same reason: the delegate callback arrives long after
+    /// the button was pressed.
+    private var capturedOrigin: Shot.Origin = .camera
+
     private let stillContext = CIContext(options: [.cacheIntermediates: false])
     private let library = PhotoLibrarySaver()
 
@@ -331,13 +333,11 @@ final class CameraModel: NSObject, ObservableObject {
         guard let device = videoDevice else { return }
         let speeds = ShutterSpeed.supported(by: device.activeFormat)
         let isos = ISOSetting.supported(by: device.activeFormat)
-        let fNumber = device.lensAperture
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.shutterSpeeds = speeds
             self.isoOptions = isos
-            self.aperture = fNumber
             // A speed the previous lens allowed may be out of range on this one.
             if let current = self.shutterSpeed, !speeds.contains(current) {
                 self.shutterSpeed = speeds.first { CMTimeCompare($0.duration, current.duration) >= 0 } ?? speeds.last
@@ -517,11 +517,13 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// Takes a photo. Every capture is written as a JPEG carrying its own
     /// settings in EXIF, saved to the camera roll, and recorded in the store.
-    /// `titled` only decides whether the naming sheet follows.
-    func capture(titled: Bool = false) {
+    /// `titled` only decides whether the naming sheet follows, and `origin`
+    /// only marks where the shot came from for the strip.
+    func capture(titled: Bool = false, origin: Shot.Origin = .camera) {
         guard state == .running, !isCapturing else { return }
         isCapturing = true
         wantsTitle = titled
+        capturedOrigin = origin
         capturedProfile = look.profile
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -744,6 +746,7 @@ final class CameraModel: NSObject, ObservableObject {
                 let version = try self.store.add(imageData: jpeg,
                                                  rawData: negative.data,
                                                  xmp: negative.xmp,
+                                                 origin: .filter,
                                                  profile: profile)
                 try await self.library.save(jpeg)
 
@@ -811,6 +814,7 @@ final class CameraModel: NSObject, ObservableObject {
                 _ = try self.store.add(imageData: jpeg,
                                        rawData: nil,
                                        xmp: nil,
+                                       origin: .preview,
                                        profile: profile)
                 try await self.library.save(jpeg)
                 self.finishCapture(error: nil)
@@ -902,6 +906,7 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         }
 
         let profile = capturedProfile
+        let origin = capturedOrigin
         let sourceMetadata = photo.metadata
         let isRAW = photo.isRawPhoto
         let wantsTitle = self.wantsTitle
@@ -952,6 +957,7 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                 let shot = try self.store.add(imageData: jpeg,
                                               rawData: negative,
                                               xmp: xmp,
+                                              origin: origin,
                                               profile: profile)
                 try await self.library.save(jpeg)
 

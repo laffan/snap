@@ -3,11 +3,14 @@
 //  Snap
 //
 //  The lower half of the screen when the filter editor is open: every knob the
-//  look exposes, grouped the way Lightroom groups them, over a sticky action
-//  bar.
+//  look exposes, grouped the way Lightroom groups them, over the roll.
+//
+//  The header carries the panel's own actions in a menu beside its title, and
+//  a handle at its centre that trades preview for panel.
 //
 
 import SwiftUI
+import UIKit
 
 struct FilterPanel<Strip: View>: View {
 
@@ -20,6 +23,11 @@ struct FilterPanel<Strip: View>: View {
     var isMonochromeLocked: Bool
     /// "Snap" for a live capture, "Version" when a stored negative is loaded.
     var primaryTitle: String
+    /// How far the panel has been pulled up over the preview, and how far it
+    /// may go. The handle in the header owns the first and the camera screen
+    /// decides the second.
+    @Binding var lift: CGFloat
+    var liftLimit: CGFloat
     var onSnap: () -> Void
     var onSave: () -> Void
     var onLoad: () -> Void
@@ -44,6 +52,8 @@ struct FilterPanel<Strip: View>: View {
                     colorMixer
                     calibration
                     raw
+                    CopyAdjustmentsButton(profile: look.profile)
+                        .padding(.top, 4)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -53,9 +63,8 @@ struct FilterPanel<Strip: View>: View {
 
             Divider().overlay(Color.white.opacity(0.12))
             strip
-                .padding(.vertical, 8)
-            Divider().overlay(Color.white.opacity(0.12))
-            actionBar
+                .padding(.top, 8)
+                .padding(.bottom, 12)
         }
         .background(Color.black)
     }
@@ -63,24 +72,73 @@ struct FilterPanel<Strip: View>: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack {
-            Text("Filter")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+        ZStack {
+            HStack(spacing: 0) {
+                Text("Filter")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
 
-            Spacer()
+                actionMenu
 
-            Button("Reset") { look.reset() }
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.55))
+                Spacer()
 
-            Button("Done", action: onClose)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white)
-                .padding(.leading, 16)
+                Button("Reset") { look.reset() }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.55))
+
+                Button("Done", action: onClose)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .padding(.leading, 16)
+            }
+
+            // Above the row rather than in it, so it sits at the centre of the
+            // header and not at the centre of whatever is left over.
+            PanelHandle(lift: $lift, limit: liftLimit)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
+    }
+
+    /// Everything the panel can do that isn't a slider. These used to be a bar
+    /// across the bottom; the room is better spent on the sliders.
+    private var actionMenu: some View {
+        Menu {
+            Button {
+                onSnap()
+            } label: {
+                Label(primaryTitle, systemImage: "camera")
+            }
+
+            Button {
+                onSave()
+            } label: {
+                Label("Save", systemImage: "square.and.pencil")
+            }
+
+            Button {
+                onLoad()
+            } label: {
+                Label("Load", systemImage: "tray.and.arrow.down")
+            }
+
+            Button {
+                onBundle()
+            } label: {
+                Label("Bundle", systemImage: "archivebox")
+            }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.leading, 6)
+                .padding(.trailing, 10)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+        }
+        .disabled(isBusy)
+        .opacity(isBusy ? 0.4 : 1)
+        .accessibilityLabel("Filter actions")
     }
 
     // MARK: - Sections
@@ -232,32 +290,89 @@ struct FilterPanel<Strip: View>: View {
             return "Last negative: iOS wouldn't rewrite the DNG, so crop and settings are only in the .xmp sidecar. Keep the two files together, and use Metadata ▸ Read Metadata from File in Lightroom Classic."
         }
     }
+}
 
-    // MARK: - Action bar
+// MARK: - Handle
 
-    private var actionBar: some View {
-        HStack(spacing: 0) {
-            action(primaryTitle, weight: .semibold, action: onSnap)
-            action("Save", action: onSave)
-            action("Load", action: onLoad)
-            action("Bundle", action: onBundle)
+/// The grab handle at the centre of the header.
+///
+/// Dragging it up pulls the panel over the preview square, which gives the
+/// sliders room without ever hiding what the camera is looking at. The camera
+/// screen puts it back when the panel closes.
+private struct PanelHandle: View {
+
+    @Binding var lift: CGFloat
+    let limit: CGFloat
+
+    /// Where the lift stood when this drag started. A drag reports its
+    /// translation from where the finger went down, so without this every
+    /// change would be measured from zero again.
+    @State private var start: CGFloat? = nil
+
+    var body: some View {
+        VStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { _ in
+                Capsule()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: 22, height: 1.5)
+            }
         }
-        .disabled(isBusy)
-        .opacity(isBusy ? 0.4 : 1)
         .padding(.vertical, 10)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 20)
+        .contentShape(Rectangle())
+        // Measured globally: the handle is being carried by the panel it is
+        // resizing, so a local translation would feed back into itself.
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { value in
+                    let base = start ?? lift
+                    if start == nil { start = base }
+                    lift = min(max(base - value.translation.height, 0), limit)
+                }
+                .onEnded { _ in start = nil }
+        )
+        .accessibilityLabel("Resize the filter panel")
     }
+}
 
-    private func action(_ title: String,
-                        weight: Font.Weight = .regular,
-                        action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: weight))
-                .foregroundStyle(.white)
+// MARK: - Copy adjustments
+
+/// Copies everything that has moved off the built-in look, one setting per
+/// line — the fastest way to get a look out of the app and into a note, a
+/// message, or `PositiveFilmProfile.swift` itself.
+private struct CopyAdjustmentsButton: View {
+
+    let profile: PositiveFilmProfile
+
+    @State private var didCopy = false
+
+    var body: some View {
+        let adjustments = profile.adjustments
+
+        Button {
+            UIPasteboard.general.string = adjustments.joined(separator: "\n")
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeOut(duration: 0.12)) { didCopy = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation(.easeOut(duration: 0.2)) { didCopy = false }
+            }
+        } label: {
+            Text(label(for: adjustments))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(adjustments.isEmpty ? 0.35 : 0.9))
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(adjustments.isEmpty)
+    }
+
+    private func label(for adjustments: [String]) -> String {
+        if adjustments.isEmpty { return "Nothing Adjusted" }
+        if didCopy { return "Copied" }
+        return "Copy Adjustments"
     }
 }

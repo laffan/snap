@@ -118,6 +118,7 @@ final class ShotStore: ObservableObject {
     func add(imageData: Data,
              rawData: Data?,
              xmp: String?,
+             origin: Shot.Origin,
              profile: PositiveFilmProfile) throws -> Shot {
         let id = UUID()
         // Adobe looks for the sidecar under the negative's own base name.
@@ -125,6 +126,7 @@ final class ShotStore: ObservableObject {
                         imageFileName: "\(id.uuidString).jpg",
                         rawFileName: rawData == nil ? nil : "\(id.uuidString).dng",
                         xmpFileName: (rawData == nil || xmp == nil) ? nil : "\(id.uuidString).xmp",
+                        origin: origin,
                         profile: profile)
 
         try imageData.write(to: imageURL(for: shot))
