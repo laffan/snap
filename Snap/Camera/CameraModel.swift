@@ -45,7 +45,7 @@ final class CameraModel: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.snap.session")
     private let videoQueue = DispatchQueue(label: "com.snap.video", qos: .userInitiated)
 
-    /// The live look. Owned here, observed by the filter panel.
+    /// The live look. Owned here, observed by the develop panel.
     let look = LookModel()
 
     /// Everything the app has shot. Every capture lands here as well as in the
@@ -184,6 +184,9 @@ final class CameraModel: NSObject, ObservableObject {
     private let stillContext = CIContext(options: [.cacheIntermediates: false])
     private let library = PhotoLibrarySaver()
 
+    /// Where the phone is, for the GPS block AVFoundation never writes.
+    private let locationTagger = LocationTagger()
+
     /// Frames are graded at roughly display resolution rather than sensor
     /// resolution. The clarity pass is the expensive stage and its radius is
     /// relative to the image, so downscaling first costs nothing in fidelity.
@@ -201,6 +204,8 @@ final class CameraModel: NSObject, ObservableObject {
     // MARK: - Lifecycle
 
     func start() {
+        locationTagger.start()
+
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             configureAndRun()
@@ -215,6 +220,8 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     func stop() {
+        locationTagger.stop()
+
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
             self.session.stopRunning()
@@ -733,7 +740,14 @@ final class CameraModel: NSObject, ObservableObject {
             guard let self else { return }
             do {
                 let data = try Data(contentsOf: rawURL)
-                let properties = RAWDeveloper.properties(of: data)
+                var properties = RAWDeveloper.properties(of: data)
+                // A version is the same photograph, taken in the same place —
+                // but the negative was never given a coordinate, so the one
+                // written into the frame it came from is carried across.
+                if properties[kCGImagePropertyGPSDictionary as String] == nil,
+                   let gps = ShotInfo.gpsProperties(at: self.store.imageURL(for: shot)) {
+                    properties[kCGImagePropertyGPSDictionary as String] = gps
+                }
 
                 let upright = try RAWDeveloper.develop(
                     dngData: data,
@@ -753,9 +767,10 @@ final class CameraModel: NSObject, ObservableObject {
                 let version = try self.store.add(imageData: jpeg,
                                                  rawData: negative.data,
                                                  xmp: negative.xmp,
-                                                 origin: .filter,
+                                                 origin: .develop,
                                                  profile: profile)
-                try await self.library.save(jpeg)
+                let identifier = try await self.library.save(jpeg)
+                self.store.setAssetIdentifier(identifier, for: version)
 
                 if wantsTitle {
                     await MainActor.run { self.pendingTitle = version }
@@ -816,17 +831,57 @@ final class CameraModel: NSObject, ObservableObject {
             do {
                 let jpeg = try PhotoEncoder.jpeg(from: image,
                                                  profile: profile,
-                                                 sourceMetadata: [:],
+                                                 sourceMetadata: self.placed([:]),
                                                  context: self.stillContext)
-                _ = try self.store.add(imageData: jpeg,
-                                       rawData: nil,
-                                       xmp: nil,
-                                       origin: .preview,
-                                       profile: profile)
-                try await self.library.save(jpeg)
+                let shot = try self.store.add(imageData: jpeg,
+                                              rawData: nil,
+                                              xmp: nil,
+                                              origin: .preview,
+                                              profile: profile)
+                let identifier = try await self.library.save(jpeg)
+                self.store.setAssetIdentifier(identifier, for: shot)
                 self.finishCapture(error: nil)
             } catch {
                 self.finishCapture(error: error.localizedDescription)
+            }
+        }
+    }
+
+    /// Adds the current fix to a capture's metadata. AVFoundation hands over
+    /// exposure, lens and timestamp but never a coordinate, so this is the only
+    /// place a Snap frame gets one.
+    private func placed(_ metadata: [String: Any]) -> [String: Any] {
+        guard metadata[kCGImagePropertyGPSDictionary as String] == nil,
+              let gps = locationTagger.gpsProperties else { return metadata }
+        var tagged = metadata
+        tagged[kCGImagePropertyGPSDictionary as String] = gps
+        return tagged
+    }
+
+    // MARK: - Deleting
+
+    /// Deletes a frame from the app and from the camera roll.
+    ///
+    /// The two copies were written together and go together: a photograph
+    /// deleted here should be gone rather than merely out of the strip. iOS
+    /// puts its own confirmation in front of the second half, and declining it
+    /// leaves the camera roll's copy standing — a decision, not a failure, so
+    /// nothing is said about it. Frames taken before the app started recording
+    /// which asset it had created have only the app's copy to remove.
+    func delete(_ shot: Shot) {
+        store.delete(shot)
+
+        guard let identifier = shot.assetIdentifier else { return }
+        Task { [weak self] in
+            do {
+                try await self?.library.delete(assetIdentifier: identifier)
+            } catch PhotoLibrarySaver.SaveError.notAuthorizedToDelete {
+                // The one outcome worth reporting: it can be fixed in Settings,
+                // where cancelling the confirmation cannot.
+                DispatchQueue.main.async {
+                    self?.errorMessage = PhotoLibrarySaver.SaveError.notAuthorizedToDelete.errorDescription
+                }
+            } catch {
             }
         }
     }
@@ -946,7 +1001,7 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
 
                 let jpeg = try PhotoEncoder.jpeg(from: graded,
                                                  profile: profile,
-                                                 sourceMetadata: sourceMetadata,
+                                                 sourceMetadata: self.placed(sourceMetadata),
                                                  context: self.stillContext)
 
                 // The negative is kept in the app's store, where the strip
@@ -965,7 +1020,8 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                                               xmp: xmp,
                                               origin: origin,
                                               profile: profile)
-                try await self.library.save(jpeg)
+                let identifier = try await self.library.save(jpeg)
+                self.store.setAssetIdentifier(identifier, for: shot)
 
                 if wantsTitle {
                     await MainActor.run { self.pendingTitle = shot }

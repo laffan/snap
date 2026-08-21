@@ -16,9 +16,11 @@ struct Shot: Codable, Identifiable, Equatable {
         case camera
         /// PS — the preview frame itself, saved as it stood.
         case preview
-        /// Made in the filter screen: a re-filtered negative, or a capture
-        /// taken from the panel's own menu.
-        case filter
+        /// Made in the develop screen: a re-developed negative, or a capture
+        /// taken from the panel's own menu. Still written as "filter": the
+        /// screen was called that when the first sidecars were written, and
+        /// those sidecars still have to load.
+        case develop = "filter"
     }
 
     var id: UUID
@@ -35,6 +37,12 @@ struct Shot: Codable, Identifiable, Equatable {
     /// File name of the Camera Raw sidecar that travels with the negative.
     var xmpFileName: String?
     var origin: Origin
+    /// Kept by a double tap, and the only thing the favourites grid reads.
+    var isFavorite: Bool
+    /// The camera roll's own name for this frame, kept so deleting it here can
+    /// delete it there. Nil for a shot the library refused, and for every shot
+    /// taken before the app started asking.
+    var assetIdentifier: String?
     var profile: PositiveFilmProfile
 
     init(id: UUID = UUID(),
@@ -45,6 +53,8 @@ struct Shot: Codable, Identifiable, Equatable {
          rawFileName: String? = nil,
          xmpFileName: String? = nil,
          origin: Origin = .camera,
+         isFavorite: Bool = false,
+         assetIdentifier: String? = nil,
          profile: PositiveFilmProfile) {
         self.id = id
         self.title = title
@@ -54,6 +64,8 @@ struct Shot: Codable, Identifiable, Equatable {
         self.rawFileName = rawFileName
         self.xmpFileName = xmpFileName
         self.origin = origin
+        self.isFavorite = isFavorite
+        self.assetIdentifier = assetIdentifier
         self.profile = profile
     }
 
@@ -82,7 +94,7 @@ extension Shot {
     enum CodingKeys: String, CodingKey {
         case id, title, notes, createdAt
         case imageFileName, rawFileName, xmpFileName
-        case origin, profile
+        case origin, isFavorite, assetIdentifier, profile
     }
 
     init(from decoder: Decoder) throws {
@@ -95,6 +107,8 @@ extension Shot {
                   rawFileName: try container.decodeIfPresent(String.self, forKey: .rawFileName),
                   xmpFileName: try container.decodeIfPresent(String.self, forKey: .xmpFileName),
                   origin: ((try? container.decodeIfPresent(Origin.self, forKey: .origin)) ?? nil) ?? .camera,
+                  isFavorite: ((try? container.decodeIfPresent(Bool.self, forKey: .isFavorite)) ?? nil) ?? false,
+                  assetIdentifier: try container.decodeIfPresent(String.self, forKey: .assetIdentifier),
                   profile: try container.decode(PositiveFilmProfile.self, forKey: .profile))
     }
 }

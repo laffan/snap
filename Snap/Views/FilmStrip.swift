@@ -14,11 +14,12 @@ struct FilmStrip: View {
 
     var selection: Shot?
     var onSelect: (Shot) -> Void
+    var onToggleFavorite: (Shot) -> Void
     var onUseLook: (Shot) -> Void
     var onShare: ([URL]) -> Void
     var onDelete: (Shot) -> Void
-    /// True in the filter panel, where a shot with no negative has nothing to
-    /// re-filter and is shown as unavailable.
+    /// True in the develop panel, where a shot with no negative has nothing to
+    /// re-develop and is shown as unavailable.
     var requiresNegative: Bool
 
     /// Thumbnails are decoded and held in memory, so the strip only reaches
@@ -35,6 +36,7 @@ struct FilmStrip: View {
     init(store: ShotStore,
          selection: Shot?,
          onSelect: @escaping (Shot) -> Void,
+         onToggleFavorite: @escaping (Shot) -> Void,
          onUseLook: @escaping (Shot) -> Void,
          onShare: @escaping ([URL]) -> Void,
          onDelete: @escaping (Shot) -> Void,
@@ -42,6 +44,7 @@ struct FilmStrip: View {
         self.store = store
         self.selection = selection
         self.onSelect = onSelect
+        self.onToggleFavorite = onToggleFavorite
         self.onUseLook = onUseLook
         self.onShare = onShare
         self.onDelete = onDelete
@@ -74,19 +77,32 @@ struct FilmStrip: View {
                 ForEach(visible) { shot in
                     let isUsable = !requiresNegative || store.rawURL(for: shot) != nil
 
-                    Thumbnail(store: store,
-                              shot: shot,
-                              edge: thumbnailEdge,
-                              isSelected: shot.id == selection?.id)
+                    ShotThumbnail(store: store,
+                                  shot: shot,
+                                  edge: thumbnailEdge,
+                                  isSelected: shot.id == selection?.id)
                         .opacity(isUsable ? 1 : 0.3)
+                        // Keeping a frame says nothing about whether it can be
+                        // re-developed, so the double tap works on a dimmed
+                        // thumbnail as the menu does. Declared first, which is
+                        // what lets a single tap wait to see whether a second
+                        // one is coming.
+                        .onTapGesture(count: 2) { onToggleFavorite(shot) }
                         // The menu still applies — a preview frame can still be
                         // shared, deleted, or have its settings borrowed.
                         .onTapGesture { if isUsable { onSelect(shot) } }
                         .contextMenu {
                             Button {
+                                onToggleFavorite(shot)
+                            } label: {
+                                Label(shot.isFavorite ? "Remove from Favorites" : "Add to Favorites",
+                                      systemImage: shot.isFavorite ? "heart.slash" : "heart")
+                            }
+
+                            Button {
                                 onUseLook(shot)
                             } label: {
-                                Label("Use Filter Settings", systemImage: "camera.filters")
+                                Label("Use Develop Settings", systemImage: "camera.filters")
                             }
 
                             Button {
@@ -152,69 +168,6 @@ struct FilmStrip: View {
 
         DispatchQueue.main.async {
             proxy.scrollTo(shot.id, anchor: .center)
-        }
-    }
-}
-
-private struct Thumbnail: View {
-
-    @ObservedObject var store: ShotStore
-    let shot: Shot
-    let edge: CGFloat
-    let isSelected: Bool
-
-    @State private var image: UIImage? = nil
-
-    /// Marks the frames the shutter didn't take: a dot for a preview frame,
-    /// a square for one made in the filter screen. The drop shadow is what
-    /// keeps white legible against a blown-out corner.
-    @ViewBuilder
-    private var originMark: some View {
-        switch shot.origin {
-        case .camera:
-            EmptyView()
-        case .preview:
-            mark(Circle())
-        case .filter:
-            mark(Rectangle())
-        }
-    }
-
-    private func mark(_ shape: some Shape) -> some View {
-        shape
-            .fill(Color.white)
-            .frame(width: 5, height: 5)
-            .shadow(color: .black.opacity(0.5), radius: 1)
-            .padding(5)
-    }
-
-    var body: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } else {
-                Color.white.opacity(0.07)
-            }
-        }
-        .frame(width: edge, height: edge)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay {
-            RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(Color.white, lineWidth: isSelected ? 2 : 0)
-        }
-        .overlay(alignment: .topTrailing) { originMark }
-        .contentShape(RoundedRectangle(cornerRadius: 4))
-        .task(id: shot.id) {
-            guard image == nil else { return }
-            let url = store.imageURL(for: shot)
-            // 3x covers the densest iPhone screen; at this size the decoded
-            // thumbnail is still tiny.
-            let pixels = edge * 3
-            image = await Task.detached(priority: .userInitiated) {
-                ShotStore.image(at: url, maxPixelSize: pixels)
-            }.value
         }
     }
 }

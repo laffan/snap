@@ -315,7 +315,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Snap needs the camera to compose and take photographs.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Snap records where a photograph was taken, so the develop screen can say where you were.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Snap saves the photographs you take to your camera roll.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Snap removes a photograph from your camera roll when you delete it here.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -344,7 +346,9 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Snap needs the camera to compose and take photographs.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Snap records where a photograph was taken, so the develop screen can say where you were.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Snap saves the photographs you take to your camera roll.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Snap removes a photograph from your camera roll when you delete it here.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

@@ -53,7 +53,7 @@ struct SliderRow: View {
 }
 
 /// A titled group of sliders.
-struct FilterSection<Content: View>: View {
+struct DevelopSection<Content: View>: View {
 
     let title: String
     @ViewBuilder var content: Content
@@ -63,7 +63,7 @@ struct FilterSection<Content: View>: View {
     @State private var isExpanded = false
 
     // Explicit because the private state above would otherwise make the
-    // memberwise initializer private, putting this out of reach of FilterPanel.
+    // memberwise initializer private, putting this out of reach of DevelopPanel.
     init(title: String, @ViewBuilder content: () -> Content) {
         self.title = title
         self.content = content()

@@ -65,7 +65,7 @@ struct SaveShotSheet: View {
                     ShotStore.image(at: url, maxPixelSize: 900)
                 }.value
             }
-            .navigationTitle("Save Look")
+            .navigationTitle("Save Develop Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

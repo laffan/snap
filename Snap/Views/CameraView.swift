@@ -3,7 +3,7 @@
 //  Snap
 //
 //  Preview at the top. Below it either the shutter and the app's own roll, or
-//  the filter editor that replaces them.
+//  the develop editor that replaces them.
 //
 
 import SwiftUI
@@ -14,11 +14,15 @@ struct CameraView: View {
     @StateObject private var camera = CameraModel()
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var isEditingFilter = false
+    @State private var isDeveloping = false
     @State private var isLoadingLook = false
+    @State private var isShowingFavorites = false
     @State private var share: ShareItem? = nil
     /// A saved frame being viewed in place of the live preview.
     @State private var viewing: Shot? = nil
+    /// Which list a swipe in the viewer walks: the whole roll, or the
+    /// favourites the frame was opened from.
+    @State private var viewerScope: ViewerScope = .roll
     /// True while the viewer is being held down to show the negative.
     @State private var showsRAW = false
     /// Where focus is pinned, in the preview's own coordinates.
@@ -27,11 +31,19 @@ struct CameraView: View {
     /// Set when a hold pinned focus, so the touch ending doesn't immediately
     /// read as the tap that releases it.
     @State private var didLockFocus = false
-    /// How far the filter panel has been pulled up over the preview, in
+    /// How far the develop panel has been pulled up over the preview, in
     /// points. The square gives up exactly this much.
     @State private var panelLift: CGFloat = 0
 
     private var store: ShotStore { camera.store }
+
+    /// Where the frame in the viewer was chosen, which is the sequence a swipe
+    /// moves along. Opening a frame from the grid keeps you among the ones you
+    /// kept; opening it from the roll walks the roll.
+    private enum ViewerScope {
+        case roll
+        case favorites
+    }
 
     /// One cell of the lens column and of the mode column beside it, so the two
     /// stay level whatever the font does.
@@ -48,26 +60,28 @@ struct CameraView: View {
             let liftLimit = CameraView.liftLimit(for: width)
             // Clamped on the way out as well as on the way in, so a width that
             // changed under a lift can't leave the square oversubscribed.
-            let lift = isEditingFilter ? min(panelLift, liftLimit) : 0
+            let lift = isDeveloping ? min(panelLift, liftLimit) : 0
 
             VStack(spacing: 0) {
                 viewer(edge: width - lift)
                 sourceIndicator
                 exposureRows
 
-                if isEditingFilter {
-                    FilterPanel(look: camera.look,
-                                isBusy: camera.isCapturing,
-                                isRAWAvailable: camera.isRAWAvailable,
-                                negativeStatus: camera.negativeStatus,
-                                isMonochromeLocked: camera.isMonochromeLocked,
-                                primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
-                                lift: $panelLift,
-                                liftLimit: liftLimit,
-                                onSnap: { primaryAction(titled: false) },
-                                onSave: { primaryAction(titled: true) },
-                                onLoad: { isLoadingLook = true },
-                                onClose: { setEditing(false) }) {
+                if isDeveloping {
+                    DevelopPanel(look: camera.look,
+                                 isBusy: camera.isCapturing,
+                                 isRAWAvailable: camera.isRAWAvailable,
+                                 negativeStatus: camera.negativeStatus,
+                                 isMonochromeLocked: camera.isMonochromeLocked,
+                                 primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
+                                 info: developInfo,
+                                 lift: $panelLift,
+                                 liftLimit: liftLimit,
+                                 onSnap: { primaryAction(titled: false) },
+                                 onSave: { primaryAction(titled: true) },
+                                 onLoad: { isLoadingLook = true },
+                                 onClose: { setEditing(false) },
+                                 favorites: { favoritesButton }) {
                         roll(selection: camera.versionSource,
                              requiresNegative: true,
                              onSelect: selectForVersion)
@@ -77,12 +91,10 @@ struct CameraView: View {
                     controlRow
                     Spacer(minLength: 0)
 
-                    textButton("Filter") { setEditing(true) }
-                        .disabled(!canEditFilter)
-                        .opacity(canEditFilter ? 1 : 0.35)
+                    developRow
                         .offset(y: -10)
 
-                    roll(selection: viewing, onSelect: { viewing = $0 })
+                    roll(selection: viewing, onSelect: openFromRoll)
                         .padding(.bottom, 10)
                 }
             }
@@ -115,7 +127,14 @@ struct CameraView: View {
                               useLook(shot)
                               isLoadingLook = false
                           },
+                          onDelete: delete,
                           onCancel: { isLoadingLook = false })
+        }
+        .sheet(isPresented: $isShowingFavorites) {
+            FavoritesGrid(store: store,
+                          onSelect: openFromFavorites,
+                          onToggleFavorite: toggleFavorite,
+                          onClose: { isShowingFavorites = false })
         }
         .sheet(item: $share) { ShareSheet(urls: $0.urls) }
         .alert("Something went wrong",
@@ -135,7 +154,9 @@ struct CameraView: View {
         ZStack {
             if let viewing {
                 ShotView(store: store, shot: viewing, edge: edge, showsRAW: $showsRAW)
-            } else if camera.versionSource != nil {
+                    .gesture(swipe { step(by: $0) })
+                    .onTapGesture(count: 2) { toggleFavorite(viewing) }
+            } else if let source = camera.versionSource {
                 livePreview
                     // Holding a negative that is under the sliders shows the
                     // development with no look on it, the same way the
@@ -146,6 +167,10 @@ struct CameraView: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         camera.setPeekingSource(true)
                     })
+                    // A negative under the sliders is still a frame being
+                    // looked at, so it moves and is kept the same way.
+                    .gesture(swipe { stepVersion(by: $0) })
+                    .onTapGesture(count: 2) { toggleFavorite(source) }
             } else {
                 livePreview
                     .overlay { ThirdsGrid() }
@@ -182,6 +207,32 @@ struct CameraView: View {
         }
         .frame(width: edge, height: edge)
         .clipped()
+        .overlay(alignment: .bottomLeading) { viewerFavoriteMark }
+    }
+
+    /// The same mark a thumbnail carries, in the same corner, for whichever
+    /// frame the viewer is showing. It reads the roll rather than the copy the
+    /// viewer is holding, so it follows a double tap wherever the tap landed.
+    @ViewBuilder
+    private var viewerFavoriteMark: some View {
+        if let id = viewing?.id ?? camera.versionSource?.id {
+            FavoriteMark(store: store, id: id)
+        }
+    }
+
+    /// A horizontal drag on a frame moves to the one beside it.
+    ///
+    /// The roll runs newest to oldest, left to right, so a swipe that carries
+    /// the frame leftward moves the way the strip does: to the older one. The
+    /// distance is long enough, and vertical drift disqualifying enough, that a
+    /// hold that wandered still peeks rather than turning the page.
+    private func swipe(_ step: @escaping (Int) -> Void) -> some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .local)
+            .onEnded { value in
+                let width = value.translation.width
+                guard abs(width) > 44, abs(width) > abs(value.translation.height) else { return }
+                step(width < 0 ? 1 : -1)
+            }
     }
 
     @ViewBuilder
@@ -248,6 +299,7 @@ struct CameraView: View {
         FilmStrip(store: store,
                   selection: selection,
                   onSelect: onSelect,
+                  onToggleFavorite: toggleFavorite,
                   onUseLook: useLook,
                   onShare: { share = ShareItem($0) },
                   onDelete: delete,
@@ -256,12 +308,12 @@ struct CameraView: View {
 
     /// How much room the value rows hold open.
     ///
-    /// Both rows' worth on the camera screen, whichever mode is lit. The filter
+    /// Both rows' worth on the camera screen, whichever mode is lit. The develop
     /// panel gets whatever the rows actually need instead: the mode buttons
     /// aren't reachable from there, so nothing can appear that would push
     /// anything, and the sliders would rather have the height.
     private var reservedRowHeight: CGFloat? {
-        isEditingFilter ? nil : ValueRowMetrics.height * 2
+        isDeveloping ? nil : ValueRowMetrics.height * 2
     }
 
     /// Shutter and ISO, shown only for the mode that is actually deciding
@@ -427,6 +479,36 @@ struct CameraView: View {
         camera.lockFocus(at: normalized)
     }
 
+    /// Develop, centred under the shutter, with the way into the favourites
+    /// beside it.
+    private var developRow: some View {
+        HStack(spacing: 0) {
+            // A gap the width of the heart on the other side, so Develop stays
+            // centred under the shutter rather than shifting by half a heart.
+            Color.clear.frame(width: FavoritesButton.width, height: 1)
+
+            textButton("Develop") { setEditing(true) }
+                .disabled(!canDevelop)
+                .opacity(canDevelop ? 1 : 0.35)
+
+            favoritesButton
+        }
+    }
+
+    private var favoritesButton: some View {
+        FavoritesButton(store: store) { isShowingFavorites = true }
+    }
+
+    /// What the develop panel says about the frame under the sliders. The live
+    /// camera has nothing to say there — it isn't a photograph yet, and its
+    /// exposure is already on the rows above.
+    private var developInfo: ShotInfoSource? {
+        guard let source = camera.versionSource else { return nil }
+        return ShotInfoSource(id: source.id,
+                              url: store.imageURL(for: source),
+                              date: source.createdAt)
+    }
+
     private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
@@ -497,20 +579,20 @@ struct CameraView: View {
         max(0, width * 0.45)
     }
 
-    /// Whether Filter can be pressed.
+    /// Whether Develop can be pressed.
     ///
     /// A frame in the viewer comes into the panel as a negative under the
     /// sliders, so one that has no negative has nowhere to go: a preview frame
     /// is a finished JPEG and there is nothing left to re-grade. The button is
     /// out rather than misleading, and putting the frame down brings it back.
-    private var canEditFilter: Bool {
+    private var canDevelop: Bool {
         guard let viewing else { return true }
         return store.rawURL(for: viewing) != nil
     }
 
     private func setEditing(_ editing: Bool) {
         withAnimation(.easeInOut(duration: 0.22)) {
-            isEditingFilter = editing
+            isDeveloping = editing
             // The lift belongs to one visit to the panel: the square is whole
             // when it opens and whole again when it closes.
             panelLift = 0
@@ -531,16 +613,16 @@ struct CameraView: View {
     /// Snap and Save both go through here: they take a live frame normally,
     /// and re-filter the loaded negative when there is one, so the panel's
     /// menu always acts on whatever the viewer is showing. Either way the
-    /// frame is marked as having come out of the filter screen.
+    /// frame is marked as having come out of the develop screen.
     private func primaryAction(titled: Bool) {
         if camera.versionSource == nil {
-            camera.capture(titled: titled, origin: .filter)
+            camera.capture(titled: titled, origin: .develop)
         } else {
             camera.captureVersion(titled: titled)
         }
     }
 
-    /// Tapping a frame while the filter panel is open loads its negative under
+    /// Tapping a frame while the develop panel is open loads its negative under
     /// the sliders; tapping the same one again lets the camera back through.
     private func selectForVersion(_ shot: Shot) {
         // The viewer shows one thing at a time: a negative under the sliders
@@ -559,10 +641,104 @@ struct CameraView: View {
         camera.look.apply(store.profile(for: shot))
     }
 
+    /// Opening a frame is also what decides which list a swipe will walk.
+    private func openFromRoll(_ shot: Shot) {
+        viewerScope = .roll
+        viewing = shot
+    }
+
+    private func openFromFavorites(_ shot: Shot) {
+        isShowingFavorites = false
+
+        // The panel's own strip loads a frame as the negative under the
+        // sliders, and a frame chosen from the grid while the panel is open
+        // should mean the same thing. One with no negative can't be developed,
+        // so it goes to the viewer instead, which means putting the panel down.
+        if isDeveloping {
+            if store.rawURL(for: shot) != nil {
+                viewing = nil
+                camera.beginVersioning(from: shot)
+                return
+            }
+            setEditing(false)
+        }
+
+        viewerScope = .favorites
+        viewing = shot
+    }
+
+    /// Moves the viewer along the list the frame was opened from.
+    ///
+    /// Stops at either end rather than wrapping: the roll has a beginning and
+    /// an end, and a swipe that jumped silently from one to the other would
+    /// lose your place in it.
+    private func step(by offset: Int) {
+        guard let viewing else { return }
+        let sequence = viewerSequence(containing: viewing)
+        guard let index = sequence.firstIndex(where: { $0.id == viewing.id }),
+              sequence.indices.contains(index + offset) else { return }
+
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        self.viewing = sequence[index + offset]
+    }
+
+    /// The favourites while the viewer is walking those and the frame is still
+    /// one of them. Letting a frame go mid-walk hands the rest of it back to
+    /// the roll rather than stranding the swipe.
+    private func viewerSequence(containing shot: Shot) -> [Shot] {
+        guard viewerScope == .favorites else { return store.shots }
+        let favorites = store.favorites
+        return favorites.contains(where: { $0.id == shot.id }) ? favorites : store.shots
+    }
+
+    /// The same swipe over a negative under the sliders, walking only the
+    /// frames that have one — the rest have nothing to develop.
+    private func stepVersion(by offset: Int) {
+        guard let source = camera.versionSource else { return }
+        let sequence = store.shots.filter { store.rawURL(for: $0) != nil }
+        guard let index = sequence.firstIndex(where: { $0.id == source.id }),
+              sequence.indices.contains(index + offset) else { return }
+
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        camera.beginVersioning(from: sequence[index + offset])
+    }
+
+    /// A double tap keeps a frame or lets it go, from the roll, the viewer or
+    /// the grid. Keeping is the firmer of the two knocks, since it is the one
+    /// that adds something.
+    private func toggleFavorite(_ shot: Shot) {
+        let kept = withAnimation(.easeOut(duration: 0.18)) {
+            store.toggleFavorite(shot)
+        }
+        UIImpactFeedbackGenerator(style: kept ? .medium : .light).impactOccurred()
+    }
+
     private func delete(_ shot: Shot) {
         if viewing?.id == shot.id { viewing = nil }
         if camera.versionSource?.id == shot.id { camera.endVersioning() }
-        store.delete(shot)
+        camera.delete(shot)
+    }
+}
+
+/// The heart in the corner of the viewer.
+///
+/// Watches the roll rather than being handed a frame, because the frame the
+/// viewer is holding is a copy taken before the double tap that changed it.
+private struct FavoriteMark: View {
+
+    @ObservedObject var store: ShotStore
+    let id: UUID
+
+    var body: some View {
+        if store.shots.contains(where: { $0.id == id && $0.isFavorite }) {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.5), radius: 2)
+                .padding(12)
+                .allowsHitTesting(false)
+                .transition(.scale.combined(with: .opacity))
+        }
     }
 }
 

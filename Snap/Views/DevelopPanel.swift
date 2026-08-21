@@ -1,18 +1,18 @@
 //
-//  FilterPanel.swift
+//  DevelopPanel.swift
 //  Snap
 //
-//  The lower half of the screen when the filter editor is open: every knob the
+//  The lower half of the screen when the develop editor is open: every knob the
 //  look exposes, grouped the way Lightroom groups them, over the roll.
 //
-//  The header carries the panel's own actions in a menu beside its title, and
-//  a handle at its centre that trades preview for panel.
+//  The header carries the panel's own actions in a menu beside its title, a
+//  heart beside that, and a handle at its centre that trades preview for panel.
 //
 
 import SwiftUI
 import UIKit
 
-struct FilterPanel<Strip: View>: View {
+struct DevelopPanel<Favorites: View, Strip: View>: View {
 
     @ObservedObject var look: LookModel
 
@@ -24,6 +24,10 @@ struct FilterPanel<Strip: View>: View {
     /// "Snap" for a live capture, "Capture Version" when a stored negative is
     /// loaded.
     var primaryTitle: String
+    /// The frame under the sliders, for the header's readout. Nil while the
+    /// sliders are moving over the live camera, which is not a photograph and
+    /// has no timestamp, place or settings to report.
+    var info: ShotInfoSource?
     /// How far the panel has been pulled up over the preview, and how far it
     /// may go. The handle in the header owns the first and the camera screen
     /// decides the second.
@@ -33,7 +37,9 @@ struct FilterPanel<Strip: View>: View {
     var onSave: () -> Void
     var onLoad: () -> Void
     var onClose: () -> Void
-    /// The roll, handed in so the panel doesn't need to know about the store.
+    /// The heart beside the menu and the roll below the sliders, both handed
+    /// in so the panel doesn't need to know about the store.
+    @ViewBuilder var favorites: Favorites
     @ViewBuilder var strip: Strip
 
     private var editing: (Bool) -> Void {
@@ -47,6 +53,11 @@ struct FilterPanel<Strip: View>: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    if let info {
+                        ShotInfoBar(source: info)
+                        Divider().overlay(Color.white.opacity(0.12))
+                    }
+
                     basic
                     toneCurve
                     colorMixer
@@ -74,11 +85,13 @@ struct FilterPanel<Strip: View>: View {
     private var header: some View {
         ZStack {
             HStack(spacing: 0) {
-                Text("Filter")
+                Text("Develop")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
 
                 actionMenu
+
+                favorites
 
                 Spacer()
 
@@ -104,19 +117,19 @@ struct FilterPanel<Strip: View>: View {
     /// across the bottom; the room is better spent on the sliders.
     ///
     /// Ordered so the capture — the one that ends a session at the panel — sits
-    /// nearest the thumb, with the two filter errands above it.
+    /// nearest the thumb, with the two settings errands above it.
     private var actionMenu: some View {
         Menu {
             Button {
                 onLoad()
             } label: {
-                Label("Load Filter", systemImage: "tray.and.arrow.down")
+                Label("Load Develop Settings", systemImage: "tray.and.arrow.down")
             }
 
             Button {
                 onSave()
             } label: {
-                Label("Save Filter", systemImage: "square.and.pencil")
+                Label("Save Develop Settings", systemImage: "square.and.pencil")
             }
 
             Button {
@@ -135,13 +148,13 @@ struct FilterPanel<Strip: View>: View {
         }
         .disabled(isBusy)
         .opacity(isBusy ? 0.4 : 1)
-        .accessibilityLabel("Filter actions")
+        .accessibilityLabel("Develop actions")
     }
 
     // MARK: - Sections
 
     private var basic: some View {
-        FilterSection(title: "Basic") {
+        DevelopSection(title: "Basic") {
             SliderRow(label: "Exposure", value: $look.profile.exposure,
                       range: -5...5, decimals: 2, onEditingChanged: editing)
             SliderRow(label: "Contrast", value: $look.profile.contrast,
@@ -175,7 +188,7 @@ struct FilterPanel<Strip: View>: View {
     }
 
     private var toneCurve: some View {
-        FilterSection(title: "Tone Curve") {
+        DevelopSection(title: "Tone Curve") {
             SliderRow(label: "S-Curve", value: $look.profile.toneCurveS,
                       range: 0...100, onEditingChanged: editing)
             SliderRow(label: "Black Lift", value: $look.profile.blackLift,
@@ -184,7 +197,7 @@ struct FilterPanel<Strip: View>: View {
     }
 
     private var colorMixer: some View {
-        FilterSection(title: "Color Mixer") {
+        DevelopSection(title: "Color Mixer") {
             subheading("Hue")
             ForEach(look.profile.bands.indices, id: \.self) { index in
                 SliderRow(label: look.profile.bands[index].name,
@@ -211,7 +224,7 @@ struct FilterPanel<Strip: View>: View {
     }
 
     private var calibration: some View {
-        FilterSection(title: "Calibration") {
+        DevelopSection(title: "Calibration") {
             subheading("Hue")
             ForEach(primaries, id: \.name) { primary in
                 SliderRow(label: primary.name,
@@ -246,7 +259,7 @@ struct FilterPanel<Strip: View>: View {
 
     @ViewBuilder
     private var raw: some View {
-        FilterSection(title: "RAW") {
+        DevelopSection(title: "RAW") {
             if isRAWAvailable {
                 note("Every shot is captured as sensor data — no JPEG is asked of the camera. The negative is developed here with Apple's noise reduction, sharpening and local tone mapping off, then cropped and graded into the JPEG.")
 
@@ -328,7 +341,7 @@ private struct PanelHandle: View {
                 }
                 .onEnded { _ in start = nil }
         )
-        .accessibilityLabel("Resize the filter panel")
+        .accessibilityLabel("Resize the develop panel")
     }
 }
 

@@ -13,6 +13,9 @@ struct LoadLookSheet: View {
 
     @ObservedObject var store: ShotStore
     var onSelect: (Shot) -> Void
+    /// Swiping a row away deletes the photograph, camera roll and all, so it
+    /// goes through the camera screen rather than straight to the store.
+    var onDelete: (Shot) -> Void
     var onCancel: () -> Void
 
     var body: some View {
@@ -31,13 +34,13 @@ struct LoadLookSheet: View {
                             .buttonStyle(.plain)
                         }
                         .onDelete { offsets in
-                            offsets.map { store.shots[$0] }.forEach(store.delete)
+                            offsets.map { store.shots[$0] }.forEach(onDelete)
                         }
                     }
                     .listStyle(.plain)
                 }
             }
-            .navigationTitle("Load Look")
+            .navigationTitle("Load Develop Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

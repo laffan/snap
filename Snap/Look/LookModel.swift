@@ -4,7 +4,7 @@
 //
 //  Holds the live profile and keeps a baked filter in step with it.
 //
-//  This is deliberately separate from CameraModel. The filter panel mutates
+//  This is deliberately separate from CameraModel. The develop panel mutates
 //  the profile on every frame of a drag; if that lived on CameraModel, every
 //  slider tick would invalidate the whole camera screen. Here only the panel
 //  observes it.

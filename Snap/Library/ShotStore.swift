@@ -25,6 +25,9 @@ final class ShotStore: ObservableObject {
     /// Newest first.
     @Published private(set) var shots: [Shot] = []
 
+    /// The kept frames, in the same order the roll shows them.
+    var favorites: [Shot] { shots.filter(\.isFavorite) }
+
     private let directory: URL
     private let fileManager = FileManager.default
 
@@ -134,11 +137,26 @@ final class ShotStore: ObservableObject {
     }
 
     func update(_ shot: Shot, title: String, notes: String) {
-        var updated = shot
-        updated.title = title
-        updated.notes = notes
-        try? writeSidecar(updated)
-        publishReload()
+        mutate(shot) {
+            $0.title = title
+            $0.notes = notes
+        }
+    }
+
+    /// Keeps or lets go of a frame. Called from a double tap, so it says what
+    /// it did back to the caller for the haptic.
+    @discardableResult
+    func toggleFavorite(_ shot: Shot) -> Bool {
+        let kept = !(storedShot(id: shot.id) ?? shot).isFavorite
+        mutate(shot) { $0.isFavorite = kept }
+        return kept
+    }
+
+    /// Records which camera-roll asset this shot became, once the library has
+    /// accepted it — deleting the shot later is what wants it.
+    func setAssetIdentifier(_ identifier: String?, for shot: Shot) {
+        guard let identifier else { return }
+        mutate(shot) { $0.assetIdentifier = identifier }
     }
 
     func delete(_ shot: Shot) {
@@ -151,6 +169,27 @@ final class ShotStore: ObservableObject {
         }
         try? fileManager.removeItem(at: sidecarURL(for: shot))
         publishReload()
+    }
+
+    /// Edits a shot's sidecar in place.
+    ///
+    /// Always starts from what is on disk rather than from the copy the caller
+    /// is holding: a view can be showing a `Shot` from before a capture wrote
+    /// its asset identifier, and writing that copy back would drop the newer
+    /// field.
+    private func mutate(_ shot: Shot, _ change: (inout Shot) -> Void) {
+        var current = storedShot(id: shot.id) ?? shot
+        change(&current)
+        try? writeSidecar(current)
+        publishReload()
+    }
+
+    private func storedShot(id: UUID) -> Shot? {
+        let url = directory.appendingPathComponent("\(id.uuidString).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(Shot.self, from: data)
     }
 
     private func sidecarURL(for shot: Shot) -> URL {

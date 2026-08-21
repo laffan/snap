@@ -5,7 +5,7 @@
 //  Writes finished frames as JPEG with the look that made them embedded in
 //  EXIF, and reads that look back out.
 //
-//  Every capture carries its settings, whether or not the filter editor was
+//  Every capture carries its settings, whether or not the develop editor was
 //  ever opened — so any file that leaves the app, by camera roll or by share,
 //  is self-describing.
 //

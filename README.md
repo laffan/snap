@@ -43,7 +43,11 @@ resolution.
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
 | `Library/ShotStore.swift` | Every shot on disk |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
-| `Views/FilterPanel.swift` | The slider editor, its menu, and the handle that resizes it |
+| `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the grid |
+| `Views/DevelopPanel.swift` | The slider editor, its menu, and the handle that resizes it |
+| `Views/FavoritesGrid.swift` | The kept frames, and the heart that opens them |
+| `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
+| `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
 
 ## RAW
@@ -86,7 +90,7 @@ Snap still tries to write the square into the DNG itself first, by narrowing
 its `DefaultCropOrigin`/`DefaultCropSize` — that holds in every converter, not
 just Adobe's, and no pixel moves. Whether iOS will author a DNG container is
 not something to assume, so the write is attempted and the *outcome* reported
-in the RAW section of the filter panel. When it fails, the crop rides in the
+in the RAW section of the develop panel. When it fails, the crop rides in the
 sidecar instead and the two never both apply, which would otherwise crop twice.
 
 What the sidecar cannot do is reach a reader that doesn't look for one. Apple
@@ -121,7 +125,7 @@ the list above stays off regardless.
 Captures are JPEG, and each one is written with the profile that made it in
 the EXIF user comment (about 750 bytes of JSON, ~1% of what an EXIF block
 holds), alongside the camera's own exposure and lens metadata. That happens on
-every shot whether or not the filter editor was ever opened, so any file
+every shot whether or not the develop editor was ever opened, so any file
 leaving the app — camera roll, share sheet — describes itself.
 
 The profile decodes leniently: a key that isn't in the JSON keeps its default
@@ -139,29 +143,68 @@ Below the frame sit a narrow column of exposure modes at the left, then
 black-and-white, the shutter and **PS** across the middle, the two round
 buttons equally far from their own edge of the screen. Exposure sits at the
 right. Under the shutter is a row of dots, one per lens, widening left to right
-the way the lenses do and filled for the one in use; **Filter** is centred
-under all of it. The modes stand in a column rather than a row to leave the
-middle of that row to the buttons.
+the way the lenses do and filled for the one in use; **Develop** is centred
+under all of it, with the heart that opens the favourites beside it — and a gap
+the width of that heart on the other side, so Develop stays under the shutter
+rather than shifting by half of it. The modes stand in a column rather than a
+row to leave the middle of that row to the buttons.
 
 Exposure steps in whole stops and is the same value as the panel's Exposure
 slider — one setting reachable two ways. Holding the number between the two
 steps for half a second clears it back to zero, which beats nine taps home from
 five stops out. It is a develop setting rather than a camera one, so it
-re-applies when a negative is re-filtered and travels to Lightroom as
+re-applies when a negative is re-developed and travels to Lightroom as
 `crs:Exposure2012`.
 
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
 that returns to the live preview. The camera controls go with the exposure
 stepper while a saved frame is up: lens, mode and black-and-white all decide
 how the *next* photograph is taken, and none of them applies to one that
-already exists. Long-press for **Use Filter Data** (puts that shot's settings
-back on the sliders), **Share JPEG**, **Share RAW** (only when the capture was
-RAW), or **Delete Image**.
+already exists. Long-press for **Add to Favorites**, **Use Develop Settings**
+(puts that shot's settings back on the sliders), **Share JPEG**, **Share RAW**
+(only when the capture was RAW), or **Delete Image**.
+
+**Swipe the frame** left or right to move along the roll. Left carries it the
+way the strip runs — newest at the left, older to the right — so a swipe goes
+to the older frame and back again, and stops at each end rather than wrapping
+round to the other one. The swipe is deliberately long, and gives up the moment
+it drifts vertically, so a hold that wandered still peeks at the negative
+instead of turning the page. It works the same way over a negative loaded under
+the sliders, where it walks only the frames that have a negative to develop.
+
+**Delete Image** deletes the photograph rather than only the app's copy of it:
+the store's JPEG, its negative and its sidecar go, and so does the asset in the
+camera roll that the same capture wrote. iOS puts its own confirmation in front
+of that half, and declining it leaves the camera roll's copy standing. Frames
+taken before the app started recording which asset it had created have only the
+app's copy to remove.
 
 Two kinds of frame are marked in the corner of their thumbnail: a dot for one
-taken with **PS**, and a square for one made in the filter screen — a
-re-filtered negative, or a capture from the panel's own menu. Everything else
+taken with **PS**, and a square for one made in the develop screen — a
+re-developed negative, or a capture from the panel's own menu. Everything else
 came off the shutter.
+
+## Favorites
+
+**Double-tap a frame to keep it** — a thumbnail in the roll, the frame in the
+viewer, a negative under the sliders, or an image in the grid. A small heart
+appears in its lower left corner, in the same white as the corner marks above
+it, because the two are one language rather than two.
+
+The heart beside **Develop**, and beside the develop panel's own menu, opens
+the kept frames as a grid, three across. It is out while nothing is kept: an
+empty grid isn't worth a screen. Tapping a frame there opens it in the viewer;
+double-tapping lets it go, and it leaves the grid as it does.
+
+A swipe in the viewer walks whichever list the frame was opened from. Come in
+from the roll and you walk the roll; come in from the grid and you stay among
+the ones you kept. Letting a frame go mid-walk hands the rest of it back to the
+roll rather than stranding the swipe.
+
+The grid is a second window onto the same roll rather than a second roll —
+nothing lives in it that isn't in the store, and keeping is one flag in the
+shot's sidecar. Opening a frame from the grid while the develop panel is up
+loads it under the sliders, the way tapping it in the panel's own strip does.
 
 ## Exposure
 
@@ -243,15 +286,15 @@ a second pins focus to that point and marks it with a yellow ring; any tap lets
 it go again. Switching lens releases the point too, since it
 means nothing on another lens.
 
-A monochrome frame stays monochrome. Loading one for re-filtering switches
+A monochrome frame stays monochrome. Loading one for re-developing switches
 B&W on and locks it: the colour it was rendered without isn't in the JPEG, and
-re-filtering it back to colour would quietly produce a different photograph
+re-developing it back to colour would quietly produce a different photograph
 from the one that was taken. Exporting the DNG still gets you the colour.
 Ending the session only puts B&W back the way it was if loading the negative
 is what turned it on.
 
-Preview frames have no negative, so they can't be re-filtered — they show
-dimmed in the panel's roll, don't respond to a tap, and put **Filter** out
+Preview frames have no negative, so they can't be re-developed — they show
+dimmed in the panel's roll, don't respond to a tap, and put **Develop** out
 while one is in the viewer. Their menu still works; they can be shared,
 deleted, or have their settings borrowed.
 
@@ -275,9 +318,9 @@ Storing full-resolution copies is what makes Share work on the original file
 rather than a thumbnail; it also means the app's storage grows with use, and
 Delete is the way to reclaim it.
 
-## Re-filtering a negative
+## Re-developing a negative
 
-The roll also lives inside the filter panel. Tapping a frame there loads its
+The roll also lives inside the develop panel. Tapping a frame there loads its
 negative under the sliders in place of the live camera, and moving a slider
 regrades it as you go — the label under the frame reads VERSION while this is
 happening, and holding the frame peeks at the ungraded development the same way
@@ -290,46 +333,79 @@ down: the live preview comes back under the sliders, still open.
 pipeline the shutter does — develop, crop, grade, encode, square the DNG,
 embed the settings — over the stored sensor data instead of the sensor. The
 result is a new shot in its own right, not an edit of the old one, which is
-why both share `prepareNegative`: a captured file and a re-filtered one should
+why both share `prepareNegative`: a captured file and a re-developed one should
 be indistinguishable apart from where the photons came from.
 
 Re-grading is cheap because the negative is demosaiced once at viewer size and
 kept; only the **Apple Tone Curve** slider feeds the RAW pipeline itself, so
 only that one costs a re-develop.
 
-## The filter editor
+## The develop editor
 
-**Filter**, centred under the shutter, replaces the lower half of the screen
+**Develop**, centred under the shutter, replaces the lower half of the screen
 with every knob the look exposes, grouped the way Lightroom groups them —
 Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the
 live preview. Double-tap any slider to return it to neutral.
 
 A saved frame that was open in the viewer comes along, as the negative behind
 it rather than as the finished JPEG it was: same square, same subject, but live
-under the sliders and ready to be re-filtered. Filter changes the controls, not
+under the sliders and ready to be re-developed. Develop changes the controls, not
 what is being looked at.
 
-Which is why **Filter** goes out while a preview frame is up. **PS** saves what
+Which is why **Develop** goes out while a preview frame is up. **PS** saves what
 was already on screen and keeps no negative, so there is nothing behind that
 JPEG for the sliders to reach — the button is dim rather than misleading, and
 putting the frame down with the **X** brings it back.
 
-The panel's own actions hang off a menu beside the **Filter** title, listed
+The panel's own actions hang off a menu beside the **Develop** title, listed
 bottom-up so the capture — the one that ends a session at the panel — sits
 nearest the thumb:
 
 | Item | Does |
 | --- | --- |
-| **Load Filter** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
-| **Save Filter** | Captures, then asks for a title (defaults to the timestamp) and notes, and keeps the look with the frame |
-| **Snap** / **Capture Version** | Same as the shutter, or re-filters the loaded negative |
+| **Load Develop Settings** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
+| **Save Develop Settings** | Captures, then asks for a title (defaults to the timestamp) and notes, and keeps the look with the frame |
+| **Snap** / **Capture Version** | Same as the shutter, or re-develops the loaded negative |
 
-Snap and Save Filter both capture, store, and save to the camera roll — the
-only difference is that Save Filter ends at the naming sheet. Both mark the
-frame as made in the filter screen, so the roll shows where it came from.
+Snap and Save Develop Settings both capture, store, and save to the camera roll
+— the only difference is that Save Develop Settings ends at the naming sheet.
+Both mark the frame as made in the develop screen, so the roll shows where it
+came from.
 
 These were a bar across the bottom of the panel. They are pressed once or twice
 a session, and forty sliders wanted the row more than they did.
+
+### What the frame is
+
+At the top of the sliders, while a negative is loaded, four short lines say what
+is being developed: **when and where** on the left, **shutter and ISO** on the
+right. A photograph is placed by time and by ground, and taken at a shutter and
+a sensitivity, so each side reads as a pair — the first line of each carries the
+reading and the second qualifies it.
+
+Everything comes out of the file rather than out of the app's own records, the
+same way the look does, so a frame taken by an older build still describes as
+much of itself as it recorded. The timestamp is EXIF's `DateTimeOriginal`,
+falling back to the shot's own; the shutter reads as a fraction until it passes
+a second and as seconds after that; the coordinate is turned into the name of
+somewhere by CoreLocation, and reads as degrees until that comes back — and goes
+on reading as degrees if it never does. Reverse geocoding is a network round
+trip that Apple rate-limits, so every answer is kept: a roll shot in one
+afternoon is mostly one place.
+
+The section is absent while the sliders are over the live camera. That isn't a
+photograph yet — it has no timestamp and no place, and its shutter and ISO are
+already on the rows above the panel.
+
+**iOS never writes a coordinate into a capture.** `AVCapturePhoto.metadata`
+carries exposure, lens and timestamp and nothing about where the phone is, so
+Snap asks CoreLocation itself and writes the GPS block on the way to JPEG —
+which means the coordinate travels with the file to the camera roll and through
+the share sheet, not just to this readout. The fix is asked for while in use
+only, to a hundred metres, and one older than five minutes is dropped rather
+than written: a photograph is placed to the street, and no coordinate beats the
+wrong one. A re-developed negative inherits the place of the frame it came from,
+since it is the same photograph.
 
 ### Trading preview for panel
 
