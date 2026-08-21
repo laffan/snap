@@ -207,12 +207,11 @@ struct CameraView: View {
         }
         .frame(width: edge, height: edge)
         .clipped()
-        .overlay(alignment: .bottomLeading) { viewerFavoriteMark }
     }
 
-    /// The same mark a thumbnail carries, in the same corner, for whichever
-    /// frame the viewer is showing. It reads the roll rather than the copy the
-    /// viewer is holding, so it follows a double tap wherever the tap landed.
+    /// Whether the frame in the viewer is kept, shown in the row below the
+    /// frame rather than on top of it — a photograph is worth more undisturbed
+    /// than a corner of it is worth as a label.
     @ViewBuilder
     private var viewerFavoriteMark: some View {
         if let id = viewing?.id ?? camera.versionSource?.id {
@@ -276,7 +275,11 @@ struct CameraView: View {
 
     @ViewBuilder
     private var sourceIndicator: some View {
-        HStack {
+        HStack(spacing: 6) {
+            // Opposite the label that says what is being shown: one side of the
+            // row says which frame this is, the other says which of its two
+            // renderings.
+            viewerFavoriteMark
             exposureMeter
             Spacer()
             Text(indicatorLabel)
@@ -323,9 +326,18 @@ struct CameraView: View {
     /// Switching mode should reveal a row, not shove the shutter and the roll
     /// down the screen — the frame above is the thing being composed, and it
     /// shouldn't move because the exposure is being talked about.
+    ///
+    /// A saved frame borrows the space. The rows decide how the *next*
+    /// photograph is exposed and say nothing about one already taken, while the
+    /// readout that does — when and where it was taken, and on what — has
+    /// exactly this room to say it in.
     private var exposureRows: some View {
         VStack(spacing: 0) {
-            if viewing == nil, camera.exposureMode != .auto {
+            if let viewing {
+                ShotInfoBar(source: infoSource(for: viewing))
+                    .padding(.horizontal, 14)
+                    .padding(.top, 2)
+            } else if camera.exposureMode != .auto {
                 ValueRow(label: "S",
                          values: camera.shutterSpeeds,
                          title: { $0.label },
@@ -479,14 +491,12 @@ struct CameraView: View {
         camera.lockFocus(at: normalized)
     }
 
-    /// Develop, centred under the shutter, with the way into the favourites
-    /// beside it.
+    /// Develop and the way into the favourites, centred under the shutter as a
+    /// pair. They are one errand — what to do with a frame — so the pair is
+    /// what sits under the middle, rather than the word with the heart hung
+    /// off its side.
     private var developRow: some View {
         HStack(spacing: 0) {
-            // A gap the width of the heart on the other side, so Develop stays
-            // centred under the shutter rather than shifting by half a heart.
-            Color.clear.frame(width: FavoritesButton.width, height: 1)
-
             textButton("Develop") { setEditing(true) }
                 .disabled(!canDevelop)
                 .opacity(canDevelop ? 1 : 0.35)
@@ -501,12 +511,17 @@ struct CameraView: View {
 
     /// What the develop panel says about the frame under the sliders. The live
     /// camera has nothing to say there — it isn't a photograph yet, and its
-    /// exposure is already on the rows above.
+    /// exposure is on the rows above.
     private var developInfo: ShotInfoSource? {
-        guard let source = camera.versionSource else { return nil }
-        return ShotInfoSource(id: source.id,
-                              url: store.imageURL(for: source),
-                              date: source.createdAt)
+        camera.versionSource.map(infoSource)
+    }
+
+    /// The frame's own file is what the readout reads, in the viewer and under
+    /// the sliders alike.
+    private func infoSource(for shot: Shot) -> ShotInfoSource {
+        ShotInfoSource(id: shot.id,
+                       url: store.imageURL(for: shot),
+                       date: shot.createdAt)
     }
 
     private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -720,7 +735,8 @@ struct CameraView: View {
     }
 }
 
-/// The heart in the corner of the viewer.
+/// The heart under the viewer, at the leading end of the row the JPEG/RAW
+/// label sits at the other end of.
 ///
 /// Watches the roll rather than being handed a frame, because the frame the
 /// viewer is holding is a copy taken before the double tap that changed it.
@@ -732,10 +748,11 @@ private struct FavoriteMark: View {
     var body: some View {
         if store.shots.contains(where: { $0.id == id && $0.isFavorite }) {
             Image(systemName: "heart.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 2)
-                .padding(12)
+                // The size and the weight of the label opposite it, so the two
+                // ends of the row read as one line.
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.leading, 6)
                 .allowsHitTesting(false)
                 .transition(.scale.combined(with: .opacity))
         }

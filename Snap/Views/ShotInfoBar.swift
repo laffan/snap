@@ -30,6 +30,8 @@ struct ShotInfoBar: View {
     /// in until it does, and stays if it never does.
     @State private var place: String? = nil
 
+    @Environment(\.openURL) private var openURL
+
     // Explicit because the private state above would otherwise make the
     // memberwise initializer private, putting this out of reach of the panel.
     init(source: ShotInfoSource) {
@@ -42,12 +44,23 @@ struct ShotInfoBar: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 if let date = info.dateLabel {
                     line(date, emphasis: true)
+                        .padding(.vertical, 1)
                 }
-                if let placeLabel {
-                    line(placeLabel, emphasis: false)
+                // A place is somewhere you can go, so the line that names it
+                // is the one thing in here that does something.
+                if let coordinate = info.coordinate, let placeLabel {
+                    Button {
+                        openMaps(at: coordinate)
+                    } label: {
+                        line(placeLabel, emphasis: false)
+                            .padding(.vertical, 1)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens this place in Google Maps")
                 }
             }
 
@@ -77,6 +90,18 @@ struct ShotInfoBar: View {
             .foregroundStyle(.white.opacity(emphasis ? 0.6 : 0.4))
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+
+    /// Google Maps by ordinary https rather than by its own URL scheme. The app
+    /// claims these links, so the tap lands in it when it is installed and in a
+    /// browser showing the same map when it isn't — and nothing has to be
+    /// declared in the Info.plist to ask whether it is there.
+    private func openMaps(at coordinate: CLLocationCoordinate2D) {
+        let query = String(format: "%.6f,%.6f", coordinate.latitude, coordinate.longitude)
+        guard let url = URL(string: "https://www.google.com/maps/search/?api=1&query=\(query)") else {
+            return
+        }
+        openURL(url)
     }
 
     /// Reading the file is quick but it is still a file, so it happens off the

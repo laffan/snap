@@ -143,11 +143,11 @@ Below the frame sit a narrow column of exposure modes at the left, then
 black-and-white, the shutter and **PS** across the middle, the two round
 buttons equally far from their own edge of the screen. Exposure sits at the
 right. Under the shutter is a row of dots, one per lens, widening left to right
-the way the lenses do and filled for the one in use; **Develop** is centred
-under all of it, with the heart that opens the favourites beside it — and a gap
-the width of that heart on the other side, so Develop stays under the shutter
-rather than shifting by half of it. The modes stand in a column rather than a
-row to leave the middle of that row to the buttons.
+the way the lenses do and filled for the one in use; **Develop** and the heart
+that opens the favourites sit centred under all of it as a pair, since they are
+one errand — what to do with a frame — rather than a word with something hung
+off its side. The modes stand in a column rather than a row to leave the middle
+of that row to the buttons.
 
 Exposure steps in whole stops and is the same value as the panel's Exposure
 slider — one setting reachable two ways. Holding the number between the two
@@ -163,6 +163,15 @@ how the *next* photograph is taken, and none of them applies to one that
 already exists. Long-press for **Add to Favorites**, **Use Develop Settings**
 (puts that shot's settings back on the sliders), **Share JPEG**, **Share RAW**
 (only when the capture was RAW), or **Delete Image**.
+
+Under the frame, the row that names what is being shown — **JPEG** or **RAW** —
+gains a heart at its other end when the frame is one you kept. It used to sit in
+the corner of the photograph; a photograph is worth more undisturbed than a
+corner of it is worth as a label. Below that row, in the space the exposure
+values hold open, the frame says when and where it was taken and on what — the
+same four lines the develop panel opens with, described under [What the frame
+is](#what-the-frame-is). Those rows set how the *next* photograph is exposed and
+have nothing to say about one already taken, so the room is free.
 
 **Swipe the frame** left or right to move along the roll. Left carries it the
 way the strip runs — newest at the left, older to the right — so a swipe goes
@@ -188,8 +197,10 @@ came off the shutter.
 
 **Double-tap a frame to keep it** — a thumbnail in the roll, the frame in the
 viewer, a negative under the sliders, or an image in the grid. A small heart
-appears in its lower left corner, in the same white as the corner marks above
-it, because the two are one language rather than two.
+appears in the thumbnail's lower left corner, in the same white as the corner
+marks above it, because the two are one language rather than two. A frame open
+in the viewer says the same thing in the row below it rather than on top of it,
+opposite the label that says which of its two renderings you are looking at.
 
 The heart beside **Develop**, and beside the develop panel's own menu, opens
 the kept frames as a grid, three across. It is out while nothing is kept: an
@@ -381,7 +392,15 @@ At the top of the sliders, while a negative is loaded, four short lines say what
 is being developed: **when and where** on the left, **shutter and ISO** on the
 right. A photograph is placed by time and by ground, and taken at a shutter and
 a sensitivity, so each side reads as a pair — the first line of each carries the
-reading and the second qualifies it.
+reading and the second qualifies it. The same four lines sit under a frame open
+in the viewer, in the same place relative to it, since the question there is the
+same one.
+
+**Tapping the place opens it in Google Maps** — an ordinary
+`https://www.google.com/maps` link, which the app claims, so the tap lands in it
+when it is installed and in a browser showing the same map when it isn't. Going
+through a URL scheme instead would mean declaring it in the Info.plist for the
+sake of asking whether the app is there.
 
 Everything comes out of the file rather than out of the app's own records, the
 same way the look does, so a frame taken by an older build still describes as

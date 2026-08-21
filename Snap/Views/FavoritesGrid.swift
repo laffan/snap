@@ -89,9 +89,9 @@ struct FavoritesButton: View {
     @ObservedObject var store: ShotStore
     var action: () -> Void
 
-    /// Known here so the camera screen can leave a gap of the same width on
-    /// the other side of Develop and keep it centred under the shutter.
-    static let width: CGFloat = 32
+    /// A tap target rather than a glyph: the heart is 12 points across and
+    /// nobody's finger is.
+    private static let side: CGFloat = 32
 
     private var isEnabled: Bool { !store.favorites.isEmpty }
 
@@ -100,7 +100,7 @@ struct FavoritesButton: View {
             Image(systemName: "heart.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.75))
-                .frame(width: FavoritesButton.width, height: 32)
+                .frame(width: FavoritesButton.side, height: FavoritesButton.side)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
