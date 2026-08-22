@@ -104,8 +104,7 @@ private struct FavoriteRow: View {
             ShotThumbnail(store: store, shot: shot, edge: FavoriteRow.thumbnailEdge)
                 // The same pair of taps the roll answers to: two to let a frame
                 // go, one to open it.
-                .onTapGesture(count: 2) { onToggleFavorite() }
-                .onTapGesture { onSelect() }
+                .gesture(doubleThenSingle(double: onToggleFavorite, single: onSelect))
 
             VStack(alignment: .leading, spacing: 3) {
                 if let date = info.dateLabel {
@@ -149,6 +148,10 @@ private struct FavoriteRow: View {
                     .lineLimit(1...4)
                     .textInputAutocapitalization(.sentences)
                     .focused($isFocused)
+                    // Asked for here rather than in the tap that opened the
+                    // field: focus given to a field that isn't on screen yet
+                    // lands nowhere, and this is the first moment it is.
+                    .onAppear { isFocused = true }
                     .padding(.vertical, 4)
                     .overlay(alignment: .bottom) {
                         Rectangle()
@@ -174,15 +177,28 @@ private struct FavoriteRow: View {
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { beginEditing() }
-                .onTapGesture { onSelect() }
+                .gesture(doubleThenSingle(double: beginEditing, single: onSelect))
                 .accessibilityHint("Double-tap to edit the caption")
         }
     }
 
+    /// Two taps beat one, deterministically.
+    ///
+    /// Attaching `.onTapGesture(count: 2)` and `.onTapGesture()` to the same
+    /// view leaves which of them wins up to SwiftUI, and in a scrolling list it
+    /// picks the single tap — which here meant the row opened the frame before
+    /// the second tap ever landed, and the caption could never be edited. Said
+    /// as an exclusive pair, the single tap only fires once the double has
+    /// failed, which is the arrangement this always meant.
+    private func doubleThenSingle(double: @escaping () -> Void,
+                                  single: @escaping () -> Void) -> some Gesture {
+        TapGesture(count: 2)
+            .onEnded { double() }
+            .exclusively(before: TapGesture().onEnded { single() })
+    }
+
     private func beginEditing() {
         draft = shot.caption
-        isFocused = true
     }
 
     private func endEditing() {

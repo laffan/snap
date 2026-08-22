@@ -172,6 +172,12 @@ neither urgent nor blind. The row holds the height of the mode column while the
 camera is live and only the X's own while a frame is up, and the height it
 hands back goes to the caption below it.
 
+**Share** and **Delete** flank it, one either side, as plain glyphs rather than
+rings so the X between them stays the one to aim at: the two things left to do
+with a photograph you have just looked at and made your mind up about. Both are
+also in the long-press menu on its thumbnail, along with Share RAW, which is the
+one that needs a menu.
+
 The camera controls go with the exposure stepper while a saved frame is up:
 lens, mode and black-and-white all decide how the *next* photograph is taken,
 and none of them applies to one that already exists. Long-press for **Add to
@@ -253,8 +259,8 @@ the sliders are open.
 **Reset** and **Done** fade in past the starburst on the way up, along with a
 drag handle at the bar's centre, around buttons that were already there and
 don't move. Nothing else arrives: what the panel can do lives in the panel, at
-the foot of the sliders it belongs to, and the capture is the word under the
-frame.
+the foot of the sliders it belongs to, and the capture is a button of its own
+under the frame.
 
 This was two bars: Develop and the heart centred under the shutter on the
 camera screen, and the same two left-aligned in the panel's header once it
@@ -471,9 +477,10 @@ the camera is what the screen is showing, auto included — it used to appear on
 for the modes that drive the exposure by hand, on the grounds that auto holds it
 at zero, but it does not sit at zero: it wanders while auto chases the scene,
 and watching it settle is how you know the meter has. Past half a stop it
-brightens; past a stop and a half it turns yellow. A frame in the viewer is the
-one thing that puts it away, since the reading belongs to the camera and not to
-a photograph already taken.
+brightens; past a stop and a half it turns yellow. Anything that isn't the
+camera puts it away — a saved frame in the viewer, a negative under the sliders
+— since the reading belongs to whatever is about to be taken, and both of those
+are photographs that already exist.
 
 Tapping it takes the reading back the other way: a frame the meter calls 1.5
 stops under sets Exposure to +1.5. It replaces rather than accumulates, because
@@ -576,13 +583,14 @@ putting the frame down with the **X** brings it back.
 The panel's own three actions are in three different places, because they are
 three different kinds of thing.
 
-**The capture is the word under the frame.** While the panel is open, the label
-at the bottom right of the preview — the one that was already reading VERSION
-over a loaded negative — reads **CAPTURE VERSION** and *is* the button. It was
-describing the very thing a menu two taps away would produce, so it produces it.
-Over the live camera it reads **SNAP** and takes an ordinary photograph. Holding
-the frame to peek at the negative turns it back into the word RAW while your
-finger is down.
+**The capture is a button of its own under the frame**, centred, where the
+shutter would be if you followed the frame's middle down. It says what it will
+make rather than what it is: **CAPTURE VERSION** over a negative under the
+sliders, **CAPTURE** over the live camera.
+
+It was briefly the label in the corner — the one already reading VERSION —
+which put an action in the one place on that row reserved for saying what
+something *is*. The corner is a label again, and the button is a button.
 
 **Load Settings** and **Save Settings** sit side by side at the foot of the
 sliders, under the RAW section. Load offers every shot as a card, newest first;
@@ -591,7 +599,7 @@ then asks for a title (defaulting to the timestamp) and a caption, and keeps the
 look with the frame. They are neither ways out of the panel nor sliders, and the
 end of the list is the one place that is neither.
 
-Snap and Save both capture, store, and save to the camera roll — the only
+Capture and Save both capture, store, and save to the camera roll — the only
 difference is that Save ends at the naming sheet. Both mark the frame as made in
 the develop screen, so the roll shows where it came from.
 

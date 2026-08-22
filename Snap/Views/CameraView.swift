@@ -322,26 +322,16 @@ struct CameraView: View {
         }
     }
 
-    /// Names what the viewer is currently showing, and — while the panel is
-    /// open — what pressing it would make.
-    ///
-    /// The word under the frame was already saying VERSION while a negative was
-    /// loaded. Capturing that version was in a menu on the bar, two taps away
-    /// from a word that was describing the very thing it would produce, so the
-    /// word does it: it reads CAPTURE VERSION and it is the button. Over the
-    /// live camera the panel's capture is an ordinary shot, so it reads SNAP.
+    /// Names what the viewer is currently showing. Only ever a label: the
+    /// corner under the frame says what this is, and nothing in it does
+    /// anything. What the panel's capture does belongs to a button of its own,
+    /// in the middle, where an action can be aimed at.
     private var indicatorLabel: String {
-        if isDeveloping {
-            if camera.isPeekingSource { return "RAW" }
-            return camera.versionSource == nil ? "SNAP" : "CAPTURE VERSION"
+        if camera.versionSource != nil {
+            return camera.isPeekingSource ? "RAW" : "VERSION"
         }
         guard viewing != nil else { return "" }
         return showsRAW ? "RAW" : "JPEG"
-    }
-
-    /// True when the word under the frame is a button rather than a label.
-    private var indicatorCaptures: Bool {
-        isDeveloping && !camera.isPeekingSource
     }
 
     /// How far the chosen exposure sits from what the meter wants, in stops.
@@ -350,9 +340,12 @@ struct CameraView: View {
     /// It used to appear only for the modes that drive the exposure themselves,
     /// on the grounds that auto holds it at zero and a permanent zero teaches
     /// nothing — but it doesn't sit at zero: it wanders as auto chases the
-    /// scene, and watching it settle is how you know the meter has. A frame in
-    /// the viewer is the one thing that puts it away, since the reading belongs
-    /// to the camera and not to a photograph already taken.
+    /// scene, and watching it settle is how you know the meter has.
+    ///
+    /// Anything that isn't the camera puts it away, because the reading is the
+    /// camera's and belongs to whatever is about to be taken: a saved frame in
+    /// the viewer, and a negative under the sliders, are both photographs that
+    /// already exist.
     ///
     /// This is the honest way to answer "am I about to underexpose this": the
     /// preview can't show noise the sensor hasn't produced yet, but the meter
@@ -360,29 +353,30 @@ struct CameraView: View {
     /// back as an Exposure setting — see `ExposureMeterReadout`.
     @ViewBuilder
     private var exposureMeter: some View {
-        if viewing == nil {
+        if viewing == nil, camera.versionSource == nil {
             ExposureMeterReadout(meter: camera.meter, look: camera.look)
         }
     }
 
-    @ViewBuilder
+    /// The row under the frame: what is kept and how it is metered at the left,
+    /// what the frame is at the right, and — while the panel is open — the one
+    /// button that takes a photograph, in the middle where the shutter would be
+    /// if you followed the frame's centre down.
     private var sourceIndicator: some View {
-        HStack(spacing: 6) {
-            // Opposite the label that says what is being shown: one side of the
-            // row says which frame this is, the other says which of its two
-            // renderings.
-            viewerFavoriteMark
-            exposureMeter
-            Spacer()
-
-            if indicatorCaptures {
-                Button { primaryAction(titled: false) } label: { indicatorText }
-                    .buttonStyle(.plain)
-                    .disabled(camera.isCapturing)
-                    .opacity(camera.isCapturing ? 0.4 : 1)
-                    .accessibilityHint("Takes a photograph with these settings")
-            } else {
+        ZStack {
+            HStack(spacing: 6) {
+                // Opposite the label that says what is being shown: one side of
+                // the row says which frame this is, the other says which of its
+                // two renderings.
+                viewerFavoriteMark
+                exposureMeter
+                Spacer()
                 indicatorText
+            }
+
+            if isDeveloping {
+                captureButton
+                    .transition(.opacity)
             }
         }
         // The inset is 8 here and 6 inside the readout, so both numbers still
@@ -396,12 +390,33 @@ struct CameraView: View {
         Text(indicatorLabel)
             .font(.system(size: 10, weight: .medium))
             .tracking(1.1)
-            .foregroundStyle(.white.opacity(indicatorCaptures || showsRAW || camera.isPeekingSource
-                                            ? 0.85 : 0.5))
+            .foregroundStyle(.white.opacity(showsRAW || camera.isPeekingSource ? 0.85 : 0.5))
             .animation(.easeOut(duration: 0.12), value: indicatorLabel)
             .padding(.trailing, 6)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
+    }
+
+    /// The panel's capture, and the only thing in this row that does anything.
+    ///
+    /// It says what it will make rather than what it is: a version of the
+    /// negative under the sliders, or an ordinary capture over the live camera.
+    private var captureButton: some View {
+        Button {
+            primaryAction(titled: false)
+        } label: {
+            Text(camera.versionSource == nil ? "CAPTURE" : "CAPTURE VERSION")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.0)
+                .foregroundStyle(.white.opacity(0.9))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(camera.isCapturing)
+        .opacity(camera.isCapturing ? 0.4 : 1)
+        .accessibilityHint("Takes a photograph with these settings")
     }
 
     /// The roll, laid once and carried by the bar above it wherever that bar
@@ -497,8 +512,21 @@ struct CameraView: View {
 
     private var shutterRow: some View {
         ZStack {
-            if viewing != nil {
-                CloseButton { viewing = nil }
+            if let viewing {
+                CloseButton { self.viewing = nil }
+
+                // The two things left to do with a photograph you have just
+                // looked at and made your mind up about. Plain glyphs rather
+                // than rings, so the X between them stays the one to aim at.
+                viewerAction("square.and.arrow.up", label: "Share") {
+                    share = ShareItem([store.imageURL(for: viewing)])
+                }
+                .offset(x: -56)
+
+                viewerAction("trash", label: "Delete") {
+                    delete(viewing)
+                }
+                .offset(x: 56)
             } else {
                 ShutterButton(isBusy: camera.isCapturing) { camera.capture() }
 
@@ -593,6 +621,20 @@ struct CameraView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("ISO")
+    }
+
+    private func viewerAction(_ symbol: String,
+                              label: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .light))
+                .foregroundStyle(.white.opacity(0.75))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     @ViewBuilder
