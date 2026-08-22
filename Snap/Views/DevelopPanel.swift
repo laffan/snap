@@ -20,10 +20,15 @@ struct DevelopPanel: View {
     var negativeStatus: CameraModel.NegativeStatus?
     /// True when the loaded negative was shot monochrome, which it stays.
     var isMonochromeLocked: Bool
+    /// True while a capture is in flight, which is when saving a look — which
+    /// takes one — has nothing to do.
+    var isBusy: Bool
     /// The frame under the sliders, for the readout at the top. Nil while the
     /// sliders are moving over the live camera, which is not a photograph and
     /// has no timestamp, place or settings to report.
     var info: ShotInfoSource?
+    var onLoad: () -> Void
+    var onSave: () -> Void
 
     private var editing: (Bool) -> Void {
         { look.setInteracting($0) }
@@ -42,6 +47,7 @@ struct DevelopPanel: View {
                 colorMixer
                 calibration
                 raw
+                settingsActions
                 CopyAdjustmentsButton(profile: look.profile)
                     .padding(.top, 4)
             }
@@ -179,6 +185,37 @@ struct DevelopPanel: View {
                 note("This camera doesn't offer Bayer RAW, so captures fall back to the processed frame.")
             }
         }
+    }
+
+    /// Loading and saving a look, at the foot of the sliders they belong to.
+    ///
+    /// These were in a menu on the action bar, where they sat beside Reset and
+    /// Done as though they were also ways out of the panel. They are neither
+    /// that nor sliders, so they get the one place that is: the end of the
+    /// list, beside each other, since they are the same errand in two
+    /// directions.
+    private var settingsActions: some View {
+        HStack(spacing: 10) {
+            settingsButton("Load Settings", action: onLoad)
+            settingsButton("Save Settings", action: onSave)
+        }
+        .padding(.top, 4)
+    }
+
+    private func settingsButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isBusy)
+        .opacity(isBusy ? 0.4 : 1)
     }
 
     private func note(_ text: String) -> some View {

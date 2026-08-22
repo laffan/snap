@@ -844,7 +844,7 @@ final class CameraModel: NSObject, ObservableObject {
 
         pendingSnapshot = try? PhotoEncoder.jpeg(from: image,
                                                  profile: look.profile,
-                                                 sourceMetadata: placed([:]),
+                                                 sourceMetadata: described([:]),
                                                  context: stillContext)
     }
 
@@ -883,7 +883,7 @@ final class CameraModel: NSObject, ObservableObject {
             do {
                 let jpeg = try PhotoEncoder.jpeg(from: image,
                                                  profile: profile,
-                                                 sourceMetadata: self.placed([:]),
+                                                 sourceMetadata: self.described([:]),
                                                  context: self.stillContext)
                 let shot = try self.store.add(imageData: jpeg,
                                               rawData: nil,
@@ -908,6 +908,24 @@ final class CameraModel: NSObject, ObservableObject {
         var tagged = metadata
         tagged[kCGImagePropertyGPSDictionary as String] = gps
         return tagged
+    }
+
+    /// Adds the moment as well as the place, for a frame the camera handed us
+    /// no metadata for at all — a preview frame, or one the app left behind on
+    /// the way out. Both of those are photographs of somewhere at some time
+    /// like any other, and the file is where that belongs.
+    ///
+    /// A real capture arrives with its own timestamp; this never overwrites it.
+    private func described(_ metadata: [String: Any]) -> [String: Any] {
+        var stamped = placed(metadata)
+
+        var exif = stamped[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+        if exif[kCGImagePropertyExifDateTimeOriginal as String] == nil {
+            exif[kCGImagePropertyExifDateTimeOriginal as String] = ShotInfo.exifTimestamp(for: Date())
+        }
+        stamped[kCGImagePropertyExifDictionary as String] = exif
+
+        return stamped
     }
 
     // MARK: - Deleting

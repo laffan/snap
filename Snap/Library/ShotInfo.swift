@@ -90,6 +90,13 @@ struct ShotInfo {
         return CLLocationCoordinate2DIsValid(coordinate) ? coordinate : nil
     }
 
+    /// The EXIF spelling of a moment, for the frames AVFoundation never hands
+    /// us metadata for — a preview frame, a snapshot the app left behind. The
+    /// same format `read` expects back, which is the point of it living here.
+    static func exifTimestamp(for date: Date) -> String {
+        exifFormatter.string(from: date)
+    }
+
     private static let exifFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"

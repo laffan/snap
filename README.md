@@ -236,10 +236,12 @@ came off the shutter.
 ## The action bar
 
 Under all of that, and directly above the roll, is the app's one row of
-buttons: **Develop**, the heart that opens the favourites, and four filled
-squares that show and hide the roll itself, left-aligned and evenly spaced. A
-starburst sits alone at the right, for the frames the app left behind while it
-was away.
+buttons, and it is split by what its halves are for. At the left, what the app
+*is*: **Develop**, and the heart that opens the favourites. At the right, what
+is on *screen*: four filled squares that show and hide the roll, and a starburst
+for the frames the app left behind while it was away. Neither of the two on the
+right changes anything — they only decide what you are looking at — which is why
+they keep to their own end.
 
 The bar and the roll are attached. Tapping **Develop** lifts the pair to just
 under the frame and fills in the sliders beneath them, while everything to do
@@ -248,13 +250,11 @@ leaves upward and slides in behind the frame. Tapping it again puts it all back,
 and so does **Done**: it is one switch, in one place, and it reads as lit while
 the sliders are open.
 
-The rest of the right of the bar is what grows on the way up — **Reset**, the
-menu of things the panel can do, and **Done**, arriving to the left of the
-starburst rather than pushing it off the end — along with a drag handle at its centre, all of
-it fading in around the three buttons on the left, which never move. The menu
-sits between the two words rather than beside the title, since loading a look,
-saving one and taking the frame are of a piece with Reset and Done and none of
-them is what the word Develop means.
+**Reset** and **Done** fade in past the starburst on the way up, along with a
+drag handle at the bar's centre, around buttons that were already there and
+don't move. Nothing else arrives: what the panel can do lives in the panel, at
+the foot of the sliders it belongs to, and the capture is the word under the
+frame.
 
 This was two bars: Develop and the heart centred under the shutter on the
 camera screen, and the same two left-aligned in the panel's header once it
@@ -314,18 +314,28 @@ session restarts.
 
 Snap keeps it. The starburst at the right of the action bar opens them as a
 grid — a wall of squares, which is the right way to look at frames nobody
-composed and nobody wrote anything about. Tap one to see it whole with the
-moment it was left behind under it, long-press for **Share JPEG** or **Delete**,
-**Clear** empties the lot.
+composed and nobody wrote anything about. Tap one to see it whole, with when and
+where it was left behind under it; long-press for **Share JPEG** or **Delete**.
+
+The menu at the top left holds the three things you can do to the collection
+rather than to one frame: **Select** turns the wall into checkboxes, with export
+and delete for whatever you tick; **Export All** hands the lot to the share
+sheet; **Clear** empties it, after asking.
 
 They live in `Documents/Snapshots`, one JPEG each, apart from the roll and never
 written to the camera roll: these are not photographs anybody took, and they
 shouldn't turn up in a year's worth of ones that were. They carry their look in
 EXIF like everything else the app writes, since they were graded on the way to
-the screen. Two hundred are kept and then the oldest go — one lands every time
-the app is put down with the preview up, which over a month is a great many
-frames of the inside of a pocket, and an experiment shouldn't quietly fill a
-phone.
+the screen — and the moment and the coordinate go in with it. AVFoundation
+stamps a real capture with the time it was taken but hands over nothing at all
+for a frame taken off the preview, so Snap writes both itself. A snapshot is a
+photograph of somewhere at some time like any other, and that belongs in the
+file rather than in a list the app keeps beside it. Preview frames from **PS**
+are stamped the same way, for the same reason.
+
+Two hundred are kept and then the oldest go — one lands every time the app is
+put down with the preview up, which over a month is a great many frames of the
+inside of a pocket, and an experiment shouldn't quietly fill a phone.
 
 ### Why it is done in two halves
 
@@ -549,9 +559,9 @@ only that one costs a re-develop.
 ## The develop editor
 
 **Develop**, at the left of the action bar, fills everything below the bar with
-every knob the look exposes and lights while it does, grouped the way Lightroom groups them — Basic,
-Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the live
-preview. Double-tap any slider to return it to neutral.
+every knob the look exposes and lights while it does, grouped the way Lightroom
+groups them — Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider
+regrades the live preview. Double-tap any slider to return it to neutral.
 
 A saved frame that was open in the viewer comes along, as the negative behind
 it rather than as the finished JPEG it was: same square, same subject, but live
@@ -563,23 +573,31 @@ was already on screen and keeps no negative, so there is nothing behind that
 JPEG for the sliders to reach — the button is dim rather than misleading, and
 putting the frame down with the **X** brings it back.
 
-The panel's own actions hang off the save icon that appears between **Reset**
-and **Done** once the panel is open. They are listed bottom-up so the capture —
-the one that ends a session at the panel — sits nearest the thumb:
+The panel's own three actions are in three different places, because they are
+three different kinds of thing.
 
-| Item | Does |
-| --- | --- |
-| **Load Develop Settings** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
-| **Save Develop Settings** | Captures, then asks for a title (defaults to the timestamp) and a caption, and keeps the look with the frame |
-| **Snap** / **Capture Version** | Same as the shutter, or re-develops the loaded negative |
+**The capture is the word under the frame.** While the panel is open, the label
+at the bottom right of the preview — the one that was already reading VERSION
+over a loaded negative — reads **CAPTURE VERSION** and *is* the button. It was
+describing the very thing a menu two taps away would produce, so it produces it.
+Over the live camera it reads **SNAP** and takes an ordinary photograph. Holding
+the frame to peek at the negative turns it back into the word RAW while your
+finger is down.
 
-Snap and Save Develop Settings both capture, store, and save to the camera roll
-— the only difference is that Save Develop Settings ends at the naming sheet.
-Both mark the frame as made in the develop screen, so the roll shows where it
-came from.
+**Load Settings** and **Save Settings** sit side by side at the foot of the
+sliders, under the RAW section. Load offers every shot as a card, newest first;
+tap one to put its settings back on the sliders, swipe to delete. Save captures,
+then asks for a title (defaulting to the timestamp) and a caption, and keeps the
+look with the frame. They are neither ways out of the panel nor sliders, and the
+end of the list is the one place that is neither.
 
-These were a bar across the bottom of the panel. They are pressed once or twice
-a session, and forty sliders wanted the row more than they did.
+Snap and Save both capture, store, and save to the camera roll — the only
+difference is that Save ends at the naming sheet. Both mark the frame as made in
+the develop screen, so the roll shows where it came from.
+
+All three of these were a menu on the action bar before that, and a bar across
+the bottom of the panel before that. A menu is a good place for things that have
+nothing to do with each other; these three each have somewhere they belong.
 
 ### What the frame is
 

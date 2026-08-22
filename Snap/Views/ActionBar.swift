@@ -11,10 +11,8 @@
 //  than the buttons: opening Develop lifts it and the roll it carries to just
 //  under the frame, and the sliders fill in beneath.
 //
-//  What the bar gains in develop mode — the handle, Reset, the menu of things
-//  the panel can do, and Done — fades in around the buttons that were already
-//  there, so nothing that was on screen has to be found again. The three on the
-//  left never move.
+//  What the bar gains in develop mode — the handle, Reset and Done — fades in
+//  at the right, around buttons that were already there and don't move.
 //
 
 import SwiftUI
@@ -30,11 +28,7 @@ struct ActionBar: View {
     var isDeveloping: Bool
     /// False when the frame in the viewer has no negative to develop.
     var canDevelop: Bool
-    var isBusy: Bool
     var isStripVisible: Bool
-    /// "Snap" for a live capture, "Capture Version" when a stored negative is
-    /// loaded.
-    var primaryTitle: String
     /// How far the panel has been pulled up over the preview, and how far it
     /// may go. The handle owns the first and the camera screen decides the
     /// second.
@@ -45,42 +39,36 @@ struct ActionBar: View {
     var onFavorites: () -> Void
     var onSnapshots: () -> Void
     var onToggleStrip: () -> Void
-    var onLoad: () -> Void
-    var onSave: () -> Void
-    var onSnap: () -> Void
     var onReset: () -> Void
     var onClose: () -> Void
 
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
+                // What the app is: a develop screen and the frames you kept.
                 develop
                 FavoritesButton(store: store, action: onFavorites)
-                stripToggle
 
                 Spacer()
 
-                // Right-aligned, and stays there: the develop chrome arrives
-                // to its left rather than pushing it off the end.
+                // What is on screen: the roll under the bar, and the frames the
+                // app left behind. Both are ways of showing something rather
+                // than ways of changing something, so they keep to their own
+                // end of the bar.
+                stripToggle
                 snapshotsButton
 
                 if isDeveloping {
                     Button("Reset", action: onReset)
                         .font(.system(size: 13))
                         .foregroundStyle(.white.opacity(0.55))
-                        .transition(.opacity)
-
-                    // Between the two words rather than beside the title: what
-                    // is in here — load a look, save one, take the frame — is
-                    // of a piece with Reset and Done, and none of it is what
-                    // the word Develop means.
-                    actionMenu
+                        .padding(.leading, 8)
                         .transition(.opacity)
 
                     Button("Done", action: onClose)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white)
-                        .padding(.leading, 8)
+                        .padding(.leading, 16)
                         .transition(.opacity)
                 }
             }
@@ -116,44 +104,6 @@ struct ActionBar: View {
         .opacity(canDevelop ? 1 : 0.35)
         .accessibilityLabel("Develop")
         .accessibilityValue(isDeveloping ? "on" : "off")
-    }
-
-    private var actionMenu: some View {
-        Menu {
-            actions
-        } label: {
-            Image(systemName: "square.and.arrow.down")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.75))
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .disabled(isBusy)
-        .opacity(isBusy ? 0.4 : 1)
-        .accessibilityLabel("Develop actions")
-    }
-
-    /// Everything the panel can do that isn't a slider, ordered so the capture —
-    /// the one that ends a session at the panel — sits nearest the thumb.
-    @ViewBuilder
-    private var actions: some View {
-        Button {
-            onLoad()
-        } label: {
-            Label("Load Develop Settings", systemImage: "tray.and.arrow.down")
-        }
-
-        Button {
-            onSave()
-        } label: {
-            Label("Save Develop Settings", systemImage: "square.and.pencil")
-        }
-
-        Button {
-            onSnap()
-        } label: {
-            Label(primaryTitle, systemImage: "camera")
-        }
     }
 
     /// The way into the frames the app left behind while it was away.

@@ -128,7 +128,10 @@ struct CameraView: View {
                                  isRAWAvailable: camera.isRAWAvailable,
                                  negativeStatus: camera.negativeStatus,
                                  isMonochromeLocked: camera.isMonochromeLocked,
-                                 info: developInfo)
+                                 isBusy: camera.isCapturing,
+                                 info: developInfo,
+                                 onLoad: { isLoadingLook = true },
+                                 onSave: { primaryAction(titled: true) })
                         .transition(.opacity)
                 }
             }
@@ -319,14 +322,26 @@ struct CameraView: View {
         }
     }
 
-    /// Names what the viewer is currently showing. Only meaningful while a
-    /// saved frame is up — the live preview is neither.
+    /// Names what the viewer is currently showing, and — while the panel is
+    /// open — what pressing it would make.
+    ///
+    /// The word under the frame was already saying VERSION while a negative was
+    /// loaded. Capturing that version was in a menu on the bar, two taps away
+    /// from a word that was describing the very thing it would produce, so the
+    /// word does it: it reads CAPTURE VERSION and it is the button. Over the
+    /// live camera the panel's capture is an ordinary shot, so it reads SNAP.
     private var indicatorLabel: String {
-        if camera.versionSource != nil {
-            return camera.isPeekingSource ? "RAW" : "VERSION"
+        if isDeveloping {
+            if camera.isPeekingSource { return "RAW" }
+            return camera.versionSource == nil ? "SNAP" : "CAPTURE VERSION"
         }
         guard viewing != nil else { return "" }
         return showsRAW ? "RAW" : "JPEG"
+    }
+
+    /// True when the word under the frame is a button rather than a label.
+    private var indicatorCaptures: Bool {
+        isDeveloping && !camera.isPeekingSource
     }
 
     /// How far the chosen exposure sits from what the meter wants, in stops.
@@ -359,18 +374,34 @@ struct CameraView: View {
             viewerFavoriteMark
             exposureMeter
             Spacer()
-            Text(indicatorLabel)
-                .font(.system(size: 10, weight: .medium))
-                .tracking(1.1)
-                .foregroundStyle(.white.opacity(showsRAW || camera.isPeekingSource ? 0.85 : 0.5))
-                .animation(.easeOut(duration: 0.12), value: indicatorLabel)
-                .padding(.trailing, 6)
+
+            if indicatorCaptures {
+                Button { primaryAction(titled: false) } label: { indicatorText }
+                    .buttonStyle(.plain)
+                    .disabled(camera.isCapturing)
+                    .opacity(camera.isCapturing ? 0.4 : 1)
+                    .accessibilityHint("Takes a photograph with these settings")
+            } else {
+                indicatorText
+            }
         }
         // The inset is 8 here and 6 inside the readout, so both numbers still
         // sit 14 from the edge while the meter carries a target worth aiming at.
         .padding(.horizontal, 8)
         .padding(.top, 4)
         .frame(height: 22)
+    }
+
+    private var indicatorText: some View {
+        Text(indicatorLabel)
+            .font(.system(size: 10, weight: .medium))
+            .tracking(1.1)
+            .foregroundStyle(.white.opacity(indicatorCaptures || showsRAW || camera.isPeekingSource
+                                            ? 0.85 : 0.5))
+            .animation(.easeOut(duration: 0.12), value: indicatorLabel)
+            .padding(.trailing, 6)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
     }
 
     /// The roll, laid once and carried by the bar above it wherever that bar
@@ -593,18 +624,13 @@ struct CameraView: View {
                   snapshots: camera.snapshots,
                   isDeveloping: isDeveloping,
                   canDevelop: canDevelop,
-                  isBusy: camera.isCapturing,
                   isStripVisible: isShowingStrip,
-                  primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
                   lift: $panelLift,
                   liftLimit: liftLimit,
                   onToggleDevelop: { setEditing(!isDeveloping) },
                   onFavorites: { isShowingFavorites = true },
                   onSnapshots: { isShowingSnapshots = true },
                   onToggleStrip: toggleStrip,
-                  onLoad: { isLoadingLook = true },
-                  onSave: { primaryAction(titled: true) },
-                  onSnap: { primaryAction(titled: false) },
                   onReset: { camera.look.reset() },
                   onClose: { setEditing(false) })
     }
