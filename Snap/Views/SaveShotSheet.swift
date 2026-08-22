@@ -13,12 +13,12 @@ struct SaveShotSheet: View {
     @ObservedObject var store: ShotStore
     let shot: Shot
     var onCancel: () -> Void
-    var onSave: (_ title: String, _ notes: String) -> Void
+    var onSave: (_ title: String, _ caption: String) -> Void
 
     @State private var title: String
-    @State private var notes: String
+    @State private var caption: String
     @State private var image: UIImage? = nil
-    @FocusState private var notesFocused: Bool
+    @FocusState private var captionFocused: Bool
 
     // Explicit because the private state below would otherwise make the
     // memberwise initializer private.
@@ -31,7 +31,7 @@ struct SaveShotSheet: View {
         self.onCancel = onCancel
         self.onSave = onSave
         _title = State(initialValue: shot.displayTitle)
-        _notes = State(initialValue: shot.notes)
+        _caption = State(initialValue: shot.caption)
     }
 
     var body: some View {
@@ -50,13 +50,13 @@ struct SaveShotSheet: View {
                 Section("Title") {
                     TextField("Title", text: $title)
                         .submitLabel(.next)
-                        .onSubmit { notesFocused = true }
+                        .onSubmit { captionFocused = true }
                 }
 
-                Section("Notes") {
-                    TextField("What were you shooting?", text: $notes, axis: .vertical)
+                Section("Caption") {
+                    TextField("What were you shooting?", text: $caption, axis: .vertical)
                         .lineLimit(3...8)
-                        .focused($notesFocused)
+                        .focused($captionFocused)
                 }
             }
             .task {
@@ -74,7 +74,7 @@ struct SaveShotSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSave(trimmed, notes)
+                        onSave(trimmed, caption)
                     }
                 }
             }

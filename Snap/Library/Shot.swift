@@ -27,7 +27,11 @@ struct Shot: Codable, Identifiable, Equatable {
     /// Empty until the shot is named. The strip and the load list fall back to
     /// the timestamp.
     var title: String
-    var notes: String
+    /// The caption, written into the frame's own EXIF as well as into this
+    /// sidecar. Entered on the review screen under the frame, or in the naming
+    /// sheet a titled capture ends at — one line of text per photograph,
+    /// reachable two ways.
+    var caption: String
     var createdAt: Date
     /// File name of the frame, relative to the store's directory.
     var imageFileName: String
@@ -47,7 +51,7 @@ struct Shot: Codable, Identifiable, Equatable {
 
     init(id: UUID = UUID(),
          title: String = "",
-         notes: String = "",
+         caption: String = "",
          createdAt: Date = Date(),
          imageFileName: String,
          rawFileName: String? = nil,
@@ -58,7 +62,7 @@ struct Shot: Codable, Identifiable, Equatable {
          profile: PositiveFilmProfile) {
         self.id = id
         self.title = title
-        self.notes = notes
+        self.caption = caption
         self.createdAt = createdAt
         self.imageFileName = imageFileName
         self.rawFileName = rawFileName
@@ -92,7 +96,10 @@ struct Shot: Codable, Identifiable, Equatable {
 extension Shot {
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, createdAt
+        case id, title, createdAt
+        // Written as "notes", which is what this field was called before it
+        // became the caption. The sidecars already on disk still have to load.
+        case caption = "notes"
         case imageFileName, rawFileName, xmpFileName
         case origin, isFavorite, assetIdentifier, profile
     }
@@ -101,7 +108,7 @@ extension Shot {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(id: try container.decode(UUID.self, forKey: .id),
                   title: try container.decode(String.self, forKey: .title),
-                  notes: try container.decode(String.self, forKey: .notes),
+                  caption: try container.decode(String.self, forKey: .caption),
                   createdAt: try container.decode(Date.self, forKey: .createdAt),
                   imageFileName: try container.decode(String.self, forKey: .imageFileName),
                   rawFileName: try container.decodeIfPresent(String.self, forKey: .rawFileName),

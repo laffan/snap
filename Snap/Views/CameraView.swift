@@ -23,6 +23,9 @@ struct CameraView: View {
     /// Which list a swipe in the viewer walks: the whole roll, or the
     /// favourites the frame was opened from.
     @State private var viewerScope: ViewerScope = .roll
+    /// True while a caption is being typed, which is when the square gives up
+    /// height to the keyboard.
+    @State private var isCaptioning = false
     /// True while the viewer is being held down to show the negative.
     @State private var showsRAW = false
     /// Where focus is pinned, in the preview's own coordinates.
@@ -63,7 +66,10 @@ struct CameraView: View {
             let lift = isDeveloping ? min(panelLift, liftLimit) : 0
 
             VStack(spacing: 0) {
-                viewer(edge: width - lift)
+                viewer(edge: CameraView.viewerEdge(width: width,
+                                                   height: geometry.size.height,
+                                                   lift: lift,
+                                                   isCaptioning: isCaptioning))
                 sourceIndicator
                 exposureRows
 
@@ -87,6 +93,7 @@ struct CameraView: View {
                              onSelect: selectForVersion)
                     }
                 } else {
+                    caption
                     Spacer(minLength: 0)
                     controlRow
                     Spacer(minLength: 0)
@@ -116,8 +123,8 @@ struct CameraView: View {
             SaveShotSheet(store: store,
                           shot: shot,
                           onCancel: { camera.pendingTitle = nil },
-                          onSave: { title, notes in
-                              store.update(shot, title: title, notes: notes)
+                          onSave: { title, caption in
+                              store.update(shot, title: title, caption: caption)
                               camera.pendingTitle = nil
                           })
         }
@@ -216,6 +223,24 @@ struct CameraView: View {
     private var viewerFavoriteMark: some View {
         if let id = viewing?.id ?? camera.versionSource?.id {
             FavoriteMark(store: store, id: id)
+        }
+    }
+
+    /// The caption for the frame being reviewed, under what the frame says
+    /// about itself and above the button that puts it down.
+    ///
+    /// Keyed to the frame, so swiping to the next one starts a new draft rather
+    /// than carrying the last one along — and the view that goes away on the
+    /// way saves what was in it.
+    @ViewBuilder
+    private var caption: some View {
+        if let viewing {
+            CaptionField(shot: viewing,
+                         isEditing: $isCaptioning,
+                         onCommit: { setCaption($0, for: viewing) })
+                .id(viewing.id)
+                .padding(.horizontal, 14)
+                .padding(.top, 8)
         }
     }
 
@@ -594,6 +619,29 @@ struct CameraView: View {
         max(0, width * 0.45)
     }
 
+    /// What sits between the bottom of the square and the bottom of the caption
+    /// field: the row that names the rendering, the room the value rows hold
+    /// open, the field itself, and a little air under it.
+    private static let captionReserve: CGFloat = 150
+
+    /// The edge of the square.
+    ///
+    /// Normally the width, less whatever the develop panel has been pulled over
+    /// it. While a caption is being typed the keyboard takes the bottom of the
+    /// screen with it, and the square gives up the difference the same way it
+    /// gives up height to the panel — so the frame, what it says about itself
+    /// and the words being written about it all stay above the keys. It never
+    /// gives up more than half, since a caption is written about a photograph
+    /// and the photograph has to still be there.
+    private static func viewerEdge(width: CGFloat,
+                                   height: CGFloat,
+                                   lift: CGFloat,
+                                   isCaptioning: Bool) -> CGFloat {
+        let edge = width - lift
+        guard isCaptioning else { return edge }
+        return min(edge, max(width * 0.5, height - captionReserve))
+    }
+
     /// Whether Develop can be pressed.
     ///
     /// A frame in the viewer comes into the panel as a negative under the
@@ -716,6 +764,16 @@ struct CameraView: View {
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         camera.beginVersioning(from: sequence[index + offset])
+    }
+
+    /// Saves a caption, and takes the viewer's own copy of the frame with it so
+    /// the field isn't left comparing what was typed against what used to be
+    /// there.
+    private func setCaption(_ caption: String, for shot: Shot) {
+        store.setCaption(caption, for: shot)
+        if viewing?.id == shot.id {
+            viewing = store.shots.first { $0.id == shot.id }
+        }
     }
 
     /// A double tap keeps a frame or lets it go, from the roll, the viewer or

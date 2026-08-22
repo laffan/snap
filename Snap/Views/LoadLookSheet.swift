@@ -87,8 +87,8 @@ private struct ShotRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
-                if !shot.notes.isEmpty {
-                    Text(shot.notes)
+                if !shot.caption.isEmpty {
+                    Text(shot.caption)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)

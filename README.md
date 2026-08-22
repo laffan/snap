@@ -43,6 +43,7 @@ resolution.
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
 | `Library/ShotStore.swift` | Every shot on disk |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
+| `Views/CaptionField.swift` | The line under a frame being reviewed |
 | `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the grid |
 | `Views/DevelopPanel.swift` | The slider editor, its menu, and the handle that resizes it |
 | `Views/FavoritesGrid.swift` | The kept frames, and the heart that opens them |
@@ -172,6 +173,31 @@ values hold open, the frame says when and where it was taken and on what — the
 same four lines the develop panel opens with, described under [What the frame
 is](#what-the-frame-is). Those rows set how the *next* photograph is exposed and
 have nothing to say about one already taken, so the room is free.
+
+**Below that is a line to write on.** Whatever is typed there becomes the
+frame's caption, saved when the keyboard goes away — Return makes a second line,
+and **Done** above the keys is what puts it down. It is the same caption the
+naming sheet asks for after a titled capture: one line of text per photograph,
+reachable two ways, the way Exposure is one setting reachable two ways.
+
+The caption is written into the frame's own EXIF as well as into its sidecar,
+into both of the fields readers call by that name — TIFF `ImageDescription`,
+which is what most tools show, and IPTC `Caption-Abstract`, which is what Photos
+and the Adobe applications read. No pixel is re-encoded to do it:
+`CGImageDestinationCopyImageSource` carries the JPEG across as it stands and
+rewrites only the metadata around it, so a caption can be edited as often as you
+like without spending a generation of quality, and everything already in the
+file — the look in the user comment, the exposure, the coordinate — comes back
+with it. Clearing a caption removes the tags rather than writing an empty
+string. The camera roll's copy was written at the moment of capture and doesn't
+get it; the file in Snap's own store does, and that is the one **Share JPEG**
+sends.
+
+Typing hands the bottom of the screen to the keyboard, so the square gives up
+the difference — the same trade the develop panel's handle makes — and the
+frame, what it says about itself, and the words being written about it all stay
+above the keys. It never gives up more than half: a caption is written about a
+photograph, and the photograph has to still be there.
 
 **Swipe the frame** left or right to move along the roll. Left carries it the
 way the strip runs — newest at the left, older to the right — so a swipe goes
@@ -375,7 +401,7 @@ nearest the thumb:
 | Item | Does |
 | --- | --- |
 | **Load Develop Settings** | Every shot as a card, newest first. Tap to put its settings back on the sliders; swipe to delete |
-| **Save Develop Settings** | Captures, then asks for a title (defaults to the timestamp) and notes, and keeps the look with the frame |
+| **Save Develop Settings** | Captures, then asks for a title (defaults to the timestamp) and a caption, and keeps the look with the frame |
 | **Snap** / **Capture Version** | Same as the shutter, or re-develops the loaded negative |
 
 Snap and Save Develop Settings both capture, store, and save to the camera roll

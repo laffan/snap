@@ -3,7 +3,8 @@
 //  Snap
 //
 //  Writes finished frames as JPEG with the look that made them embedded in
-//  EXIF, and reads that look back out.
+//  EXIF, reads that look back out, and writes a caption into a file that has
+//  already been saved.
 //
 //  Every capture carries its settings, whether or not the develop editor was
 //  ever opened — so any file that leaves the app, by camera roll or by share,
@@ -109,6 +110,53 @@ enum PhotoEncoder {
             return appTag
         }
         return json
+    }
+
+    // MARK: - Captions
+
+    /// Writes a caption into a frame that is already on disk.
+    ///
+    /// No pixel is touched and no JPEG generation is spent:
+    /// `CGImageDestinationCopyImageSource` carries the encoded image across as
+    /// it stands and rewrites only the metadata around it. What it is handed is
+    /// the file's own properties with the caption added, so everything already
+    /// in there — the look in the user comment, the exposure, the coordinate —
+    /// comes back with it.
+    ///
+    /// The caption goes into both of the fields readers call by that name: TIFF
+    /// `ImageDescription`, which is what most tools show, and IPTC
+    /// `Caption-Abstract`, which is what Photos and the Adobe applications
+    /// read. Clearing it removes the tags rather than writing an empty string,
+    /// so a caption taken back reads as absent rather than as blank.
+    static func write(caption: String, toImageAt url: URL) throws {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let type = CGImageSourceGetType(source) else {
+            throw EncodeError.destination
+        }
+
+        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
+        let value: Any = caption.isEmpty ? kCFNull as Any : caption
+
+        var tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
+        tiff[kCGImagePropertyTIFFImageDescription as String] = value
+        properties[kCGImagePropertyTIFFDictionary as String] = tiff
+
+        var iptc = properties[kCGImagePropertyIPTCDictionary as String] as? [String: Any] ?? [:]
+        iptc[kCGImagePropertyIPTCCaptionAbstract as String] = value
+        properties[kCGImagePropertyIPTCDictionary as String] = iptc
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, type, 1, nil),
+              CGImageDestinationCopyImageSource(destination,
+                                                source,
+                                                properties as CFDictionary,
+                                                nil) else {
+            throw EncodeError.destination
+        }
+
+        // Atomically, because the frame being rewritten is the one the viewer
+        // and the strip are reading.
+        try (output as Data).write(to: url, options: .atomic)
     }
 
     // MARK: - Reading

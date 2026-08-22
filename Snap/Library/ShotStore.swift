@@ -136,10 +136,32 @@ final class ShotStore: ObservableObject {
         return shot
     }
 
-    func update(_ shot: Shot, title: String, notes: String) {
+    func update(_ shot: Shot, title: String, caption: String) {
         mutate(shot) {
             $0.title = title
-            $0.notes = notes
+            $0.caption = caption
+        }
+        embed(caption, in: shot)
+    }
+
+    /// The caption from the review screen, under the frame it belongs to.
+    func setCaption(_ caption: String, for shot: Shot) {
+        mutate(shot) { $0.caption = caption }
+        embed(caption, in: shot)
+    }
+
+    /// The other half of a caption: the frame's own EXIF, which is what a file
+    /// leaving the app carries with it. The sidecar is the fast path the lists
+    /// read; this is the durable one, exactly as with the look.
+    ///
+    /// Off the main thread, because it rewrites a full-resolution JPEG's
+    /// metadata — no pixel is re-encoded, but it is still several megabytes
+    /// read and written, and a caption is typed while the frame it belongs to
+    /// is on screen.
+    private func embed(_ caption: String, in shot: Shot) {
+        let url = imageURL(for: shot)
+        Task.detached(priority: .utility) {
+            try? PhotoEncoder.write(caption: caption, toImageAt: url)
         }
     }
 
