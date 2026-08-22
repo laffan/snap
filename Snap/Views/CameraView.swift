@@ -293,15 +293,21 @@ struct CameraView: View {
 
     /// How far the chosen exposure sits from what the meter wants, in stops.
     ///
-    /// Shown only when the exposure is being driven by hand — in auto the
-    /// camera holds this at zero, so it would be a permanent zero teaching
-    /// nothing. This is the honest way to answer "am I about to underexpose
-    /// this": the preview can't show noise the sensor hasn't produced yet, but
-    /// the meter knows exactly how far off the settings are. Tapping it hands
-    /// the reading back as an Exposure setting — see `ExposureMeterReadout`.
+    /// Up whenever the camera is what is on screen, in auto as well as by hand.
+    /// It used to appear only for the modes that drive the exposure themselves,
+    /// on the grounds that auto holds it at zero and a permanent zero teaches
+    /// nothing — but it doesn't sit at zero: it wanders as auto chases the
+    /// scene, and watching it settle is how you know the meter has. A frame in
+    /// the viewer is the one thing that puts it away, since the reading belongs
+    /// to the camera and not to a photograph already taken.
+    ///
+    /// This is the honest way to answer "am I about to underexpose this": the
+    /// preview can't show noise the sensor hasn't produced yet, but the meter
+    /// knows exactly how far off the settings are. Tapping it hands the reading
+    /// back as an Exposure setting — see `ExposureMeterReadout`.
     @ViewBuilder
     private var exposureMeter: some View {
-        if viewing == nil, camera.exposureMode != .auto {
+        if viewing == nil {
             ExposureMeterReadout(meter: camera.meter, look: camera.look)
         }
     }
@@ -400,6 +406,13 @@ struct CameraView: View {
 
     private var controlRow: some View {
         VStack(spacing: 4) {
+            // Above the shutter, since they decide how the next photograph is
+            // taken. Held in place but hidden while a saved frame is up, for
+            // the same reason the lens dots are.
+            SubProfileToggles(look: camera.look)
+                .opacity(viewing == nil ? 1 : 0)
+                .allowsHitTesting(viewing == nil)
+
             shutterRow
 
             // Held in place but hidden while a saved frame is up. The dots
@@ -559,11 +572,14 @@ struct CameraView: View {
     }
 
     /// The frame's own file is what the readout reads, in the viewer and under
-    /// the sliders alike.
+    /// the sliders alike. The sub-profiles are the one thing it is handed
+    /// rather than reads: they are in the file's EXIF too, inside the look, but
+    /// the sidecar already has them in hand.
     private func infoSource(for shot: Shot) -> ShotInfoSource {
         ShotInfoSource(id: shot.id,
                        url: store.imageURL(for: shot),
-                       date: shot.createdAt)
+                       date: shot.createdAt,
+                       subProfiles: shot.profile.activeSubProfiles)
     }
 
     private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -952,6 +968,44 @@ private struct ExposureMeterReadout: View {
         .animation(.easeOut(duration: 0.15), value: magnitude >= 1.5)
         .accessibilityLabel("Exposure meter")
         .accessibilityHint("Applies the reading to the exposure setting")
+    }
+}
+
+/// Indoor and Night, above the shutter.
+///
+/// A house and a moon, lit in the one colour this interface has for something
+/// switched on. They lay a few settings over the base look rather than editing
+/// it — see `SubProfile` — so the panel's sliders go on showing the base while
+/// one of these is on, and switching it off puts the frame back exactly.
+///
+/// Watches the look itself, so a toggle redraws two glyphs rather than the
+/// whole camera screen.
+private struct SubProfileToggles: View {
+
+    @ObservedObject var look: LookModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(SubProfile.allCases) { subProfile in
+                let isOn = look.profile.subProfiles.contains(subProfile)
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    look.profile.toggle(subProfile)
+                } label: {
+                    Image(systemName: subProfile.symbol)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isOn ? Color.snapAccent : .white.opacity(0.5))
+                        // Small glyphs, ordinary-sized targets.
+                        .frame(width: 36, height: 26)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(subProfile.label)
+                .accessibilityValue(isOn ? "on" : "off")
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: look.profile.subProfiles)
     }
 }
 

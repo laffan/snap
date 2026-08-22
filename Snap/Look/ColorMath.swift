@@ -42,6 +42,27 @@ func luma(_ c: RGB) -> Float {
     simd_dot(c, lumaWeights)
 }
 
+// MARK: - White balance
+
+/// Warms or cools a colour by pulling the red and blue channels apart.
+///
+/// This is the temperature axis of a white balance: red one way, blue the
+/// other, green left alone — green is the tint axis and nothing here moves it.
+/// `amount` is the fraction each channel is pushed by, positive for warmer.
+///
+/// The gains are divided through by what they do to white, so the frame keeps
+/// its brightness and only its colour moves. White itself doesn't stay white —
+/// that is the whole point of a temperature slider — but it doesn't get lighter
+/// or darker on the way.
+@inline(__always)
+func whiteBalanced(_ c: RGB, amount: Float) -> RGB {
+    guard amount != 0 else { return c }
+    let gain = RGB(1 + amount, 1, 1 - amount)
+    let brightness = simd_dot(gain, lumaWeights)
+    guard brightness > 0 else { return c }
+    return c * (gain / brightness)
+}
+
 // MARK: - HSV
 
 /// Returns `(hue in 0..<360, saturation 0...1, value 0...1)`.

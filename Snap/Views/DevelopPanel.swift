@@ -153,6 +153,10 @@ struct DevelopPanel<Favorites: View>: View {
 
     private var basic: some View {
         DevelopSection(title: "Basic") {
+            // First, the way a white balance comes first: it decides what
+            // colour the light was, and everything under it is built on that.
+            SliderRow(label: "Temperature", value: $look.profile.temperature,
+                      onEditingChanged: editing)
             SliderRow(label: "Exposure", value: $look.profile.exposure,
                       range: -5...5, decimals: 2, onEditingChanged: editing)
             SliderRow(label: "Contrast", value: $look.profile.contrast,
@@ -357,25 +361,40 @@ private struct CopyAdjustmentsButton: View {
     var body: some View {
         let adjustments = profile.adjustments
 
-        Button {
-            UIPasteboard.general.string = adjustments.joined(separator: "\n")
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            withAnimation(.easeOut(duration: 0.12)) { didCopy = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation(.easeOut(duration: 0.2)) { didCopy = false }
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                UIPasteboard.general.string = adjustments.joined(separator: "\n")
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeOut(duration: 0.12)) { didCopy = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.easeOut(duration: 0.2)) { didCopy = false }
+                }
+            } label: {
+                Text(label(for: adjustments))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(adjustments.isEmpty ? 0.35 : 0.9))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
             }
-        } label: {
-            Text(label(for: adjustments))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(adjustments.isEmpty ? 0.35 : 0.9))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color.white.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(adjustments.isEmpty)
+
+            // The clipboard is not a place you can look, so what would be
+            // copied is written out under the button that would copy it —
+            // which also makes this the shortest way to read what this frame
+            // is, without walking forty sliders looking for the ones that moved.
+            ForEach(adjustments, id: \.self) { line in
+                Text(line)
+                    .font(.system(size: 10))
+                    .monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.4))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(adjustments.isEmpty)
+        .animation(.easeOut(duration: 0.15), value: adjustments)
     }
 
     private func label(for adjustments: [String]) -> String {

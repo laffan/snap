@@ -45,7 +45,7 @@ final class LookModel: ObservableObject {
 
     init(profile: PositiveFilmProfile = PositiveFilmProfile()) {
         self.profile = profile
-        self.requested = BakeRequest(profile: profile, resolution: .final)
+        self.requested = BakeRequest(profile: profile.resolved, resolution: .final)
     }
 
     /// The filter to render with. Read from the capture queue on every frame.
@@ -62,15 +62,21 @@ final class LookModel: ObservableObject {
     /// A guaranteed full-resolution filter for `profile`, reusing the baked
     /// one when it already matches. Captures go through this so a still is
     /// never graded by the draft LUT that a drag left behind.
+    ///
+    /// Resolved on the way in, like every other bake: what is stored keeps the
+    /// base profile and its sub-profiles apart, and what is *rendered* is the
+    /// one with the other laid over it.
     func finalFilter(for profile: PositiveFilmProfile) -> PositiveFilmFilter {
+        let resolved = profile.resolved
+
         lock.lock()
         let cached = bakedFilter
         lock.unlock()
 
-        if let cached, cached.resolution == .final, cached.profile == profile {
+        if let cached, cached.resolution == .final, cached.profile == resolved {
             return cached
         }
-        return PositiveFilmFilter(profile: profile, resolution: .final)
+        return PositiveFilmFilter(profile: resolved, resolution: .final)
     }
 
     /// Hook for `Slider(onEditingChanged:)`.
@@ -92,7 +98,7 @@ final class LookModel: ObservableObject {
     // MARK: - Baking
 
     private func requestBake() {
-        let request = BakeRequest(profile: profile,
+        let request = BakeRequest(profile: profile.resolved,
                                   resolution: isInteracting ? .draft : .final)
         lock.lock()
         requested = request

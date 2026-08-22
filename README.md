@@ -34,6 +34,7 @@ resolution.
 | File | Role |
 | --- | --- |
 | `Look/PositiveFilmProfile.swift` | The look, written in Lightroom slider units. **Edit this to change the defaults.** |
+| `Look/SubProfile.swift` | Indoor and Night, laid over the look rather than into it |
 | `Look/PositiveFilmFilter.swift` | Bakes the profile into a 3D LUT and applies the Core Image chain |
 | `Look/LookModel.swift` | Holds the live profile and keeps a baked filter in step with it |
 | `Look/ColorMath.swift` | HSV conversion, tone curves, black point, vibrance |
@@ -256,6 +257,62 @@ nothing lives in it that isn't in the store, and keeping is one flag in the
 shot's sidecar. Opening a frame from the grid while the develop panel is up
 loads it under the sliders, the way tapping it in the roll does.
 
+## Sub-profiles
+
+The look is built in daylight, and daylight is not where every photograph gets
+taken. Under a warm lamp it comes out yellow, because a profile that assumes
+5500K has no way to know it isn't; in a dark room it comes out grainy, because a
+curve built to open shadows opens the sensor noise living in them.
+
+Both are corrections rather than changes of mind about the look, so they don't
+touch it. **Two small buttons above the shutter** — a house and a moon — lay a
+named handful of settings over the top of the base profile, lit in the one
+colour this interface has for something switched on:
+
+| | Sets |
+| --- | --- |
+| **Indoor** | Temperature −20, which takes the yellow off a lamp-lit room without pretending it is daylight |
+| **Night** | Exposure −0.6 and Shadows −40 — down, and shadows *closed* rather than opened, since what is in the shadows of a dark frame is mostly noise |
+
+A sub-profile *sets* the settings it names rather than nudging them, so a toggle
+means the same thing wherever the base happens to be sitting, and switching it
+off puts the frame back exactly. Both at once apply in the order they sit in the
+row.
+
+Nothing here edits the base profile. The develop panel's sliders go on showing
+the base values while one is lit, because the base is still what is being worked
+on — the sub-profile is laid over it at the moment of rendering, by
+`PositiveFilmProfile.resolved`, which is what every bake, capture and sidecar
+goes through. What is *stored* keeps the two apart: the frame's EXIF carries the
+base profile and the flags separately, so a shot can be reopened with its
+sub-profile still switchable rather than baked into numbers nobody can pick
+apart again. **Use Develop Settings** on such a frame lights the same buttons it
+was taken with.
+
+A frame taken with one lit says so on the review screen: the same house or moon
+sits beside its shutter speed, in the same yellow.
+
+### Temperature
+
+Indoor needs a white balance to work with, so the Basic panel has one — a
+**Temperature** slider in Lightroom's relative −100...100 units, negative for
+cooler, first in the section the way a white balance comes first in any raw
+pipeline.
+
+It is baked into the same lookup table as everything else that is a pure
+function of colour, which is what keeps the preview and the capture identical.
+The maths is the temperature axis of a white balance and nothing more: red one
+way, blue the other, green untouched, ±25% at full deflection, with the gains
+divided through by what they do to white so the frame changes colour without
+changing brightness. Green is the tint axis, and Snap has no tint slider — one
+axis is what fixes a room.
+
+The negative is the one place it can't fully follow. Camera Raw keeps a raw
+file's white balance in Kelvin and reserves `crs:IncrementalTemperature` for
+relative edits, which it may well ignore on a DNG; the sidecar writes it anyway
+when it is non-zero, and where it is ignored the negative opens at the
+temperature it was shot at, which is the honest fallback.
+
 ## Exposure
 
 Two of the three classic modes mean something on a phone. An iPhone lens has a
@@ -306,9 +363,14 @@ partly shows.
 
 Rather than guess at those, Snap does what a camera does and meters. The EV
 readout under the frame is `exposureTargetOffset`: how far the chosen settings
-sit from what the meter wants, in stops, negative for under. It appears only
-when the exposure is being driven by hand, since auto holds it at zero. Past
-half a stop it brightens; past a stop and a half it turns yellow.
+sit from what the meter wants, in stops, negative for under. It is up whenever
+the camera is what the screen is showing, auto included — it used to appear only
+for the modes that drive the exposure by hand, on the grounds that auto holds it
+at zero, but it does not sit at zero: it wanders while auto chases the scene,
+and watching it settle is how you know the meter has. Past half a stop it
+brightens; past a stop and a half it turns yellow. A frame in the viewer is the
+one thing that puts it away, since the reading belongs to the camera and not to
+a photograph already taken.
 
 Tapping it takes the reading back the other way: a frame the meter calls 1.5
 stops under sets Exposure to +1.5. It replaces rather than accumulates, because
@@ -482,6 +544,12 @@ its slider is. Settings still sitting at their default are left out, so what
 lands in a note is the *difference* — which is what a look is, and what would be
 pasted back into `PositiveFilmProfile.swift` to make it the new default. The
 button reads Nothing Adjusted while there is no difference to copy.
+
+Those lines are printed under the button as well. The clipboard is not a place
+you can look, and this is also the shortest way to read what a frame actually
+is without walking forty sliders looking for the ones that moved. A lit
+sub-profile is named there rather than expanded into the settings it sets,
+since it is a switch rather than an edit.
 
 ### Keeping sliders responsive
 

@@ -15,6 +15,15 @@ struct PositiveFilmProfile: Codable, Equatable {
 
     // MARK: - Basic
 
+    /// Lightroom's relative Temperature, −100...100. Negative is cooler, the
+    /// way the blue end of the slider is.
+    ///
+    /// A white balance rather than a tint: it pulls the red and blue channels
+    /// apart and leaves green where it is, which is the axis the slider names.
+    /// Zero by default — the look is built against daylight, and a profile
+    /// should not carry a correction for a room it wasn't shot in.
+    var temperature: Float = 0
+
     /// Exposure in stops, −5...5.
     ///
     /// A develop setting rather than a camera one, so it re-applies when a
@@ -118,6 +127,45 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// 100 is Apple's own rendering. Only used on the RAW path.
     var rawBoost: Float = 10
 
+    // MARK: - Sub-profiles
+
+    /// Which sub-profiles are lit. They are laid over the top of everything
+    /// above at the moment of rendering — see `resolved` — so nothing in here
+    /// is edited by them and the sliders go on showing the base.
+    var subProfiles: Set<SubProfile> = []
+
+    /// The lit sub-profiles in a fixed order, for anything that shows them.
+    var activeSubProfiles: [SubProfile] {
+        SubProfile.allCases.filter { subProfiles.contains($0) }
+    }
+
+    /// The profile as it is actually rendered: the base with whatever
+    /// sub-profiles are lit laid over it.
+    ///
+    /// Everything that bakes, grades or describes a rendering goes through
+    /// this; everything that is *stored* keeps the base and the flags apart, so
+    /// a shot can be reopened with the sub-profile still switchable.
+    var resolved: PositiveFilmProfile {
+        guard !subProfiles.isEmpty else { return self }
+
+        var result = self
+        for subProfile in activeSubProfiles {
+            result = subProfile.applied(to: result)
+        }
+        // Already applied: a resolved profile resolves to itself, which is what
+        // keeps a second pass from laying them on twice.
+        result.subProfiles = []
+        return result
+    }
+
+    mutating func toggle(_ subProfile: SubProfile) {
+        if subProfiles.contains(subProfile) {
+            subProfiles.remove(subProfile)
+        } else {
+            subProfiles.insert(subProfile)
+        }
+    }
+
     // MARK: - Slider → renderer conversions
 
     /// Lightroom's hue sliders run a band roughly a third of the way to its
@@ -132,6 +180,11 @@ struct PositiveFilmProfile: Codable, Equatable {
     static func saturationMultiplier(_ slider: Float) -> Float {
         max(0, 1 + slider / 100)
     }
+
+    /// How far the red and blue channels are pulled apart, ±0.25 at full
+    /// deflection — firm enough to take a lamp off a white wall, short of the
+    /// theatrical.
+    var temperatureAmount: Float { temperature / 100 * 0.25 }
 
     /// Blend amount for the contrast S-curve (see `sCurve(_:amount:)`).
     var contrastAmount: Float { contrast / 100 }
@@ -184,12 +237,14 @@ struct PositiveFilmProfile: Codable, Equatable {
 extension PositiveFilmProfile {
 
     enum CodingKeys: String, CodingKey {
+        case temperature
         case exposure, contrast, highlights, shadows, blacks, clarity, sharpness, vibrance
         case blackAndWhite
         case toneCurveS, blackLift
         case bands
         case redPrimary, greenPrimary, bluePrimary
         case rawBoost
+        case subProfiles
     }
 
     init(from decoder: Decoder) throws {
@@ -207,6 +262,7 @@ extension PositiveFilmProfile {
             ((try? container.decodeIfPresent(Bool.self, forKey: key)) ?? nil) ?? fallback
         }
 
+        temperature = float(.temperature, temperature)
         exposure   = float(.exposure, exposure)
         contrast   = float(.contrast, contrast)
         highlights = float(.highlights, highlights)
@@ -220,6 +276,12 @@ extension PositiveFilmProfile {
         blackLift  = float(.blackLift, blackLift)
 
         rawBoost    = float(.rawBoost, rawBoost)
+
+        // A raw value this build doesn't know throws, and the whole set falls
+        // back to empty rather than the shot failing to load.
+        if let decoded = ((try? container.decodeIfPresent(Set<SubProfile>.self, forKey: .subProfiles)) ?? nil) {
+            subProfiles = decoded
+        }
 
         if let decoded = ((try? container.decodeIfPresent([HSLBand].self, forKey: .bands)) ?? nil),
            !decoded.isEmpty {
@@ -258,6 +320,7 @@ extension PositiveFilmProfile {
             lines.append("\(label): \(formatted)")
         }
 
+        compare("Temperature", temperature, base.temperature)
         compare("Exposure", exposure, base.exposure, decimals: 2)
         compare("Contrast", contrast, base.contrast)
         compare("Highlights", highlights, base.highlights)
@@ -287,6 +350,12 @@ extension PositiveFilmProfile {
         }
 
         compare("Apple Tone Curve", rawBoost, base.rawBoost)
+
+        // Not a slider and not pasteable, but it is part of what makes this
+        // frame different from the built-in look, which is what the list is.
+        if !subProfiles.isEmpty {
+            lines.append("Sub-profiles: \(activeSubProfiles.map(\.label).joined(separator: ", "))")
+        }
 
         return lines
     }

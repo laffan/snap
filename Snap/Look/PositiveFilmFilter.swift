@@ -5,11 +5,11 @@
 //  Turns a PositiveFilmProfile into something Core Image can run, and applies
 //  it identically to the live preview and to the captured frame.
 //
-//  Everything that is a pure per-pixel function of colour — calibration,
-//  contrast, vibrance, the HSL mixer, the tone curve — is baked once into a
-//  single 3D lookup table. That keeps the per-frame cost to one texture fetch
-//  no matter how elaborate the grade gets, and guarantees the preview and the
-//  saved file go through the exact same maths.
+//  Everything that is a pure per-pixel function of colour — white balance,
+//  calibration, contrast, vibrance, the HSL mixer, the tone curve — is baked
+//  once into a single 3D lookup table. That keeps the per-frame cost to one
+//  texture fetch no matter how elaborate the grade gets, and guarantees the
+//  preview and the saved file go through the exact same maths.
 //
 //  The adjustments that are *not* per-pixel — highlight/shadow recovery,
 //  exposure, clarity and sharpening — stay as real filters around the LUT.
@@ -152,14 +152,17 @@ final class PositiveFilmFilter {
         return values.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
-    /// The per-pixel grade, in the order Lightroom applies it: camera
-    /// calibration, then the basic panel (blacks, contrast, vibrance), then
-    /// the colour mixer, then the point curve.
+    /// The per-pixel grade, in the order Lightroom applies it: white balance,
+    /// camera calibration, then the basic panel (blacks, contrast, vibrance),
+    /// then the colour mixer, then the point curve.
     private static func grade(_ input: RGB,
                               profile: PositiveFilmProfile,
                               calibration: simd_float3x3,
                               bands: [ResolvedBand]) -> RGB {
-        var color = clamp01(calibration * input)
+        // First, as white balance always is: everything downstream is built on
+        // an assumption about what colour the light was.
+        var color = clamp01(whiteBalanced(input, amount: profile.temperatureAmount))
+        color = clamp01(calibration * color)
         color = clamp01(shiftBlacks(color, by: profile.blacksShift))
         color = sCurve(color, amount: profile.contrastAmount)
         color = clamp01(applyVibrance(color, amount: profile.vibranceAmount))

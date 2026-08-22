@@ -35,7 +35,11 @@ enum CameraRawSidecar {
     /// was built against.
     private static let cameraProfile = "Adobe Standard"
 
-    static func xmp(for profile: PositiveFilmProfile, crop: RAWCropper.CropFractions?) -> String {
+    static func xmp(for baseProfile: PositiveFilmProfile, crop: RAWCropper.CropFractions?) -> String {
+        // The negative should open wearing what the JPEG is wearing, and what
+        // the JPEG is wearing is the profile with its sub-profiles laid on.
+        let profile = baseProfile.resolved
+
         var attributes: [String] = [
             "crs:Version=\"\(processVersion)\"",
             "crs:ProcessVersion=\"\(processVersion)\"",
@@ -57,6 +61,15 @@ enum CameraRawSidecar {
             attribute("Sharpness", profile.sharpness),
             attribute("Vibrance", profile.vibrance),
         ]
+
+        // Camera Raw keeps a raw file's white balance in Kelvin and reserves
+        // the incremental pair for relative edits, which it may well ignore on
+        // a DNG — in which case the negative opens at the temperature it was
+        // shot at, which is the honest fallback. Written only when it says
+        // something, so a frame with no temperature on it doesn't claim one.
+        if profile.temperature != 0 {
+            attributes.append(attribute("IncrementalTemperature", profile.temperature))
+        }
 
         // Colour mixer. Sorted by centre so the bands line up with Lightroom's
         // fixed order regardless of how they're stored.

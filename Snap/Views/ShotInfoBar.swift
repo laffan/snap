@@ -13,12 +13,14 @@
 import CoreLocation
 import SwiftUI
 
-/// What the bar needs in order to describe a frame: the file to read, and the
-/// shot's own timestamp for a capture that carried no EXIF date of its own.
+/// What the bar needs in order to describe a frame: the file to read, the
+/// shot's own timestamp for a capture that carried no EXIF date of its own, and
+/// which sub-profiles were lit when the shutter went.
 struct ShotInfoSource: Equatable {
     var id: UUID
     var url: URL
     var date: Date
+    var subProfiles: [SubProfile] = []
 }
 
 struct ShotInfoBar: View {
@@ -67,9 +69,25 @@ struct ShotInfoBar: View {
             Spacer(minLength: 0)
 
             VStack(alignment: .trailing, spacing: 2) {
-                if let shutter = info.shutterLabel {
-                    line(shutter, emphasis: true)
+                // The sub-profiles sit beside the shutter because they belong
+                // to the same half of the question: not when and where, but on
+                // what. Lit in the colour they were lit in when the frame was
+                // taken.
+                if info.shutterLabel != nil || !source.subProfiles.isEmpty {
+                    HStack(spacing: 5) {
+                        ForEach(source.subProfiles) { subProfile in
+                            Image(systemName: subProfile.symbol)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.snapAccent)
+                                .accessibilityLabel(subProfile.label)
+                        }
+
+                        if let shutter = info.shutterLabel {
+                            line(shutter, emphasis: true)
+                        }
+                    }
                 }
+
                 if let iso = info.isoLabel {
                     line(iso, emphasis: false)
                 }
