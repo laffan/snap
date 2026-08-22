@@ -2,151 +2,55 @@
 //  DevelopPanel.swift
 //  Snap
 //
-//  The lower half of the screen when the develop editor is open: every knob the
-//  look exposes, grouped the way Lightroom groups them. The roll stays where it
-//  always is, on the floor of the screen below this.
+//  Every knob the look exposes, grouped the way Lightroom groups them.
 //
-//  The header carries the panel's own actions in a menu beside its title, a
-//  heart beside that, and a handle at its centre that trades preview for panel.
+//  Just the sliders: the bar that opens and closes this, and the roll it
+//  carries, live above it in `ActionBar` — one row of buttons in one place,
+//  whichever screen is up.
 //
 
 import SwiftUI
 import UIKit
 
-struct DevelopPanel<Favorites: View>: View {
+struct DevelopPanel: View {
 
     @ObservedObject var look: LookModel
 
-    var isBusy: Bool
     var isRAWAvailable: Bool
     var negativeStatus: CameraModel.NegativeStatus?
     /// True when the loaded negative was shot monochrome, which it stays.
     var isMonochromeLocked: Bool
-    /// "Snap" for a live capture, "Capture Version" when a stored negative is
-    /// loaded.
-    var primaryTitle: String
-    /// The frame under the sliders, for the header's readout. Nil while the
+    /// The frame under the sliders, for the readout at the top. Nil while the
     /// sliders are moving over the live camera, which is not a photograph and
     /// has no timestamp, place or settings to report.
     var info: ShotInfoSource?
-    /// How far the panel has been pulled up over the preview, and how far it
-    /// may go. The handle in the header owns the first and the camera screen
-    /// decides the second.
-    @Binding var lift: CGFloat
-    var liftLimit: CGFloat
-    var onSnap: () -> Void
-    var onSave: () -> Void
-    var onLoad: () -> Void
-    var onClose: () -> Void
-    /// The heart beside the menu, handed in so the panel doesn't need to know
-    /// about the store.
-    @ViewBuilder var favorites: Favorites
 
     private var editing: (Bool) -> Void {
         { look.setInteracting($0) }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().overlay(Color.white.opacity(0.12))
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let info {
-                        ShotInfoBar(source: info)
-                        Divider().overlay(Color.white.opacity(0.12))
-                    }
-
-                    basic
-                    toneCurve
-                    colorMixer
-                    calibration
-                    raw
-                    CopyAdjustmentsButton(profile: look.profile)
-                        .padding(.top, 4)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let info {
+                    ShotInfoBar(source: info)
+                    Divider().overlay(Color.white.opacity(0.12))
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 20)
-            }
-            .scrollIndicators(.hidden)
 
-            // The panel closes on a rule, with the roll under it.
-            Divider().overlay(Color.white.opacity(0.12))
+                basic
+                toneCurve
+                colorMixer
+                calibration
+                raw
+                CopyAdjustmentsButton(profile: look.profile)
+                    .padding(.top, 4)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .padding(.bottom, 20)
         }
+        .scrollIndicators(.hidden)
         .background(Color.black)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                Text("Develop")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-
-                actionMenu
-
-                favorites
-
-                Spacer()
-
-                Button("Reset") { look.reset() }
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.55))
-
-                Button("Done", action: onClose)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.leading, 16)
-            }
-
-            // Above the row rather than in it, so it sits at the centre of the
-            // header and not at the centre of whatever is left over.
-            PanelHandle(lift: $lift, limit: liftLimit)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-    }
-
-    /// Everything the panel can do that isn't a slider. These used to be a bar
-    /// across the bottom; the room is better spent on the sliders.
-    ///
-    /// Ordered so the capture — the one that ends a session at the panel — sits
-    /// nearest the thumb, with the two settings errands above it.
-    private var actionMenu: some View {
-        Menu {
-            Button {
-                onLoad()
-            } label: {
-                Label("Load Develop Settings", systemImage: "tray.and.arrow.down")
-            }
-
-            Button {
-                onSave()
-            } label: {
-                Label("Save Develop Settings", systemImage: "square.and.pencil")
-            }
-
-            Button {
-                onSnap()
-            } label: {
-                Label(primaryTitle, systemImage: "camera")
-            }
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.6))
-                .padding(.leading, 6)
-                .padding(.trailing, 10)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-        }
-        .disabled(isBusy)
-        .opacity(isBusy ? 0.4 : 1)
-        .accessibilityLabel("Develop actions")
     }
 
     // MARK: - Sections
@@ -301,49 +205,6 @@ struct DevelopPanel<Favorites: View>: View {
         case (false, false):
             return "Last negative: iOS wouldn't rewrite the DNG, so crop and settings are only in the .xmp sidecar. Keep the two files together, and use Metadata ▸ Read Metadata from File in Lightroom Classic."
         }
-    }
-}
-
-// MARK: - Handle
-
-/// The grab handle at the centre of the header.
-///
-/// Dragging it up pulls the panel over the preview square, which gives the
-/// sliders room without ever hiding what the camera is looking at. The camera
-/// screen puts it back when the panel closes.
-private struct PanelHandle: View {
-
-    @Binding var lift: CGFloat
-    let limit: CGFloat
-
-    /// Where the lift stood when this drag started. A drag reports its
-    /// translation from where the finger went down, so without this every
-    /// change would be measured from zero again.
-    @State private var start: CGFloat? = nil
-
-    var body: some View {
-        VStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { _ in
-                Capsule()
-                    .fill(Color.white.opacity(0.35))
-                    .frame(width: 22, height: 1.5)
-            }
-        }
-        .padding(.vertical, 10)
-        .padding(.horizontal, 20)
-        .contentShape(Rectangle())
-        // Measured globally: the handle is being carried by the panel it is
-        // resizing, so a local translation would feed back into itself.
-        .gesture(
-            DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                .onChanged { value in
-                    let base = start ?? lift
-                    if start == nil { start = base }
-                    lift = min(max(base - value.translation.height, 0), limit)
-                }
-                .onEnded { _ in start = nil }
-        )
-        .accessibilityLabel("Resize the develop panel")
     }
 }
 

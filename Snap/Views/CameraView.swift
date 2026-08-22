@@ -17,6 +17,9 @@ struct CameraView: View {
     @State private var isDeveloping = false
     @State private var isLoadingLook = false
     @State private var isShowingFavorites = false
+    /// Whether the roll is showing under the bar. The grid button on the bar
+    /// owns this; it starts up, since the roll is most of what the bar is for.
+    @State private var isShowingStrip = true
     @State private var share: ShareItem? = nil
     /// A saved frame being viewed in place of the live preview.
     @State private var viewing: Shot? = nil
@@ -70,48 +73,63 @@ struct CameraView: View {
             let lift = isDeveloping ? min(panelLift, liftLimit) : 0
 
             VStack(spacing: 0) {
-                viewer(edge: CameraView.viewerEdge(width: width,
-                                                   height: geometry.size.height,
-                                                   lift: lift,
-                                                   isCaptioning: isCaptioning))
-                sourceIndicator
-                exposureRows
+                // The frame and the two rows that describe it. Drawn over
+                // everything below, so the capture controls slide up behind it
+                // rather than across it when the panel opens.
+                VStack(spacing: 0) {
+                    viewer(edge: CameraView.viewerEdge(width: width,
+                                                       height: geometry.size.height,
+                                                       lift: lift,
+                                                       isCaptioning: isCaptioning))
+                    sourceIndicator
+                    exposureRows
+                }
+                .background(Color.black)
+                .zIndex(1)
+
+                // Everything that belongs to taking a photograph rather than
+                // developing one. It leaves upward, which is what makes room
+                // for the sliders and what the bar below rides up into.
+                if !isDeveloping {
+                    VStack(spacing: 0) {
+                        caption
+                        // The caption keeps its distance from what is under it
+                        // however much room the screen has to spare.
+                        Spacer(minLength: 15)
+                        controlRow
+                        Spacer(minLength: 0)
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                // The bar and the roll under it: the same two things in the
+                // same order on every screen. Opening the panel doesn't move
+                // them apart, it lifts the pair.
+                actionBar(liftLimit: liftLimit)
+
+                if isDeveloping {
+                    Divider().overlay(Color.white.opacity(0.12))
+                }
+
+                if isShowingStrip {
+                    roll
+                        .padding(.top, 2)
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
+
+                    if isDeveloping {
+                        Divider().overlay(Color.white.opacity(0.12))
+                    }
+                }
 
                 if isDeveloping {
                     DevelopPanel(look: camera.look,
-                                 isBusy: camera.isCapturing,
                                  isRAWAvailable: camera.isRAWAvailable,
                                  negativeStatus: camera.negativeStatus,
                                  isMonochromeLocked: camera.isMonochromeLocked,
-                                 primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
-                                 info: developInfo,
-                                 lift: $panelLift,
-                                 liftLimit: liftLimit,
-                                 onSnap: { primaryAction(titled: false) },
-                                 onSave: { primaryAction(titled: true) },
-                                 onLoad: { isLoadingLook = true },
-                                 onClose: { setEditing(false) },
-                                 favorites: { favoritesButton })
-                } else {
-                    caption
-                    // The caption keeps its distance from what is under it
-                    // however much room the screen has to spare.
-                    Spacer(minLength: 15)
-                    controlRow
-                    Spacer(minLength: 0)
-
-                    developRow
-                        .offset(y: -10)
+                                 info: developInfo)
+                        .transition(.opacity)
                 }
-
-                // The roll is the floor of every screen — the camera's, the
-                // viewer's and the panel's — so that it stays where it is while
-                // everything above it changes. It used to be laid twice, once
-                // at the foot of the camera screen and once inside the panel,
-                // which is what let the two disagree about where the bottom is.
-                roll
-                    .padding(.top, 8)
-                    .padding(.bottom, 10)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Color.black.ignoresSafeArea())
@@ -335,9 +353,10 @@ struct CameraView: View {
         .frame(height: 22)
     }
 
-    /// Which frame the roll outlines, and what tapping one means, is the only
-    /// thing that changes with the screen above it: a negative to put under the
-    /// sliders while the panel is open, a frame to look at otherwise.
+    /// The roll, laid once and carried by the bar above it wherever that bar
+    /// goes. Which frame it outlines and what tapping one means are the only
+    /// things that change with the screen: a negative to put under the sliders
+    /// while the panel is open, a frame to look at otherwise.
     private var roll: some View {
         FilmStrip(store: store,
                   selection: isDeveloping ? camera.versionSource : viewing,
@@ -546,22 +565,30 @@ struct CameraView: View {
         camera.lockFocus(at: normalized)
     }
 
-    /// Develop and the way into the favourites, centred under the shutter as a
-    /// pair. They are one errand — what to do with a frame — so the pair is
-    /// what sits under the middle, rather than the word with the heart hung
-    /// off its side.
-    private var developRow: some View {
-        HStack(spacing: 0) {
-            textButton("Develop") { setEditing(true) }
-                .disabled(!canDevelop)
-                .opacity(canDevelop ? 1 : 0.35)
-
-            favoritesButton
-        }
+    /// The one bar of buttons, in the one place it lives. What it can do grows
+    /// while the panel is open; where it sits and what is already on it do not
+    /// change.
+    private func actionBar(liftLimit: CGFloat) -> some View {
+        ActionBar(store: store,
+                  isDeveloping: isDeveloping,
+                  canDevelop: canDevelop,
+                  isBusy: camera.isCapturing,
+                  isStripVisible: isShowingStrip,
+                  primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
+                  lift: $panelLift,
+                  liftLimit: liftLimit,
+                  onDevelop: { setEditing(true) },
+                  onFavorites: { isShowingFavorites = true },
+                  onToggleStrip: toggleStrip,
+                  onLoad: { isLoadingLook = true },
+                  onSave: { primaryAction(titled: true) },
+                  onSnap: { primaryAction(titled: false) },
+                  onReset: { camera.look.reset() },
+                  onClose: { setEditing(false) })
     }
 
-    private var favoritesButton: some View {
-        FavoritesButton(store: store) { isShowingFavorites = true }
+    private func toggleStrip() {
+        withAnimation(.easeInOut(duration: 0.22)) { isShowingStrip.toggle() }
     }
 
     /// What the develop panel says about the frame under the sliders. The live
@@ -580,18 +607,6 @@ struct CameraView: View {
                        url: store.imageURL(for: shot),
                        date: shot.createdAt,
                        subProfiles: shot.profile.activeSubProfiles)
-    }
-
-    private func textButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.75))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     /// One dot per lens, widening left to right the way the lenses do, centred

@@ -46,7 +46,8 @@ resolution.
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
 | `Views/CaptionField.swift` | The line under a frame being reviewed |
 | `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the grid |
-| `Views/DevelopPanel.swift` | The slider editor, its menu, and the handle that resizes it |
+| `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
+| `Views/DevelopPanel.swift` | The slider editor |
 | `Views/FavoritesGrid.swift` | The kept frames, and the heart that opens them |
 | `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
 | `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
@@ -141,21 +142,18 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
-The strip is the floor of every screen — the camera's, the viewer's and the
-develop panel's — and it is laid once, below whichever of them is up, so it
-stays exactly where it is while everything above it changes. It used to be laid
-twice, once at the foot of the camera screen and once inside the panel, which is
-what let the two disagree about where the bottom of the screen was.
+The strip is laid once, under the action bar, and goes wherever that bar goes —
+the foot of the camera screen, or up under the frame with the sliders beneath
+it. It used to be laid twice, once at the foot of the camera screen and once
+inside the panel, which is what let the two disagree about where the bottom of
+the screen was.
 
 Below the frame sit a narrow column of exposure modes at the left, then
 black-and-white, the shutter and **PS** across the middle, the two round
 buttons equally far from their own edge of the screen. Exposure sits at the
 right. Under the shutter is a row of dots, one per lens, widening left to right
-the way the lenses do and filled for the one in use; **Develop** and the heart
-that opens the favourites sit centred under all of it as a pair, since they are
-one errand — what to do with a frame — rather than a word with something hung
-off its side. The modes stand in a column rather than a row to leave the middle
-of that row to the buttons.
+the way the lenses do and filled for the one in use. The modes stand in a column
+rather than a row to leave the middle of that row to the buttons.
 
 Exposure steps in whole stops and is the same value as the panel's Exposure
 slider — one setting reachable two ways. Holding the number between the two
@@ -232,6 +230,32 @@ Two kinds of frame are marked in the corner of their thumbnail: a dot for one
 taken with **PS**, and a square for one made in the develop screen — a
 re-developed negative, or a capture from the panel's own menu. Everything else
 came off the shutter.
+
+## The action bar
+
+Under all of that, and directly above the roll, is the app's one row of
+buttons, left-aligned: **Develop**, the heart that opens the favourites, and a
+grid that shows and hides the roll itself.
+
+The bar and the roll are attached. Opening Develop lifts the pair to just under
+the frame and fills in the sliders beneath them, while everything to do with
+taking a photograph — the shutter, the modes, the lens dots, the caption —
+leaves upward and slides in behind the frame. Pressing **Done** puts it all
+back. The bar gains a chevron, a drag handle, **Reset** and **Done** on the way
+up, fading in around the buttons that were already there.
+
+This was two bars: Develop and the heart centred under the shutter on the
+camera screen, and the same two left-aligned in the panel's header once it
+opened, with the roll laid separately under each. The same two buttons in two
+arrangements read as two different pairs, and a bar that is in one place is
+easier to learn than a bar that is in two.
+
+The grid button drops the roll out from under the bar and brings it back. With
+the panel open that is another two inches of sliders; with it closed it is a
+frame with nothing under it but the shutter. It dims rather than lighting in
+the accent when the roll is down: the one colour this interface has is spent on
+settings that change the photograph, and whether the roll is showing is not one
+of them.
 
 ## Favorites
 
@@ -433,9 +457,9 @@ Delete is the way to reclaim it.
 
 ## Re-developing a negative
 
-The roll is still there under the develop panel, since it is under every
-screen. Tapping a frame in it loads that frame's negative under the sliders in
-place of the live camera, and moving a slider regrades it as you go — the label
+The roll rides up with the bar when the panel opens, so it sits between the two.
+Tapping a frame in it loads that frame's negative under the sliders in place of
+the live camera, and moving a slider regrades it as you go — the label
 under the frame reads VERSION while this is happening, and holding the frame
 peeks at the ungraded development the same way the saved-frame viewer does. The
 loaded frame is outlined in its thumbnail, and the strip scrolls to it when the
@@ -455,10 +479,10 @@ only that one costs a re-develop.
 
 ## The develop editor
 
-**Develop**, centred under the shutter, replaces the lower half of the screen
-with every knob the look exposes, grouped the way Lightroom groups them —
-Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the
-live preview. Double-tap any slider to return it to neutral.
+**Develop**, at the left of the action bar, fills everything below the bar with
+every knob the look exposes, grouped the way Lightroom groups them — Basic,
+Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the live
+preview. Double-tap any slider to return it to neutral.
 
 A saved frame that was open in the viewer comes along, as the negative behind
 it rather than as the finished JPEG it was: same square, same subject, but live
@@ -470,9 +494,10 @@ was already on screen and keeps no negative, so there is nothing behind that
 JPEG for the sliders to reach — the button is dim rather than misleading, and
 putting the frame down with the **X** brings it back.
 
-The panel's own actions hang off a menu beside the **Develop** title, listed
-bottom-up so the capture — the one that ends a session at the panel — sits
-nearest the thumb:
+The panel's own actions hang off the chevron that appears beside **Develop**
+once the panel is open — the word doesn't move, it just stops being a button
+and starts being a menu. They are listed bottom-up so the capture — the one
+that ends a session at the panel — sits nearest the thumb:
 
 | Item | Does |
 | --- | --- |
@@ -530,11 +555,11 @@ since it is the same photograph.
 
 ### Trading preview for panel
 
-A handle sits at the centre of the panel's header. Dragging it up pulls the
-panel over the preview, and the square gives up exactly what the panel gains,
-which keeps the frame square while it shrinks. The drag stops at 45% of the
-width — past that the viewfinder has stopped being one. Closing the panel hands
-the whole square back.
+A handle fades into the centre of the action bar while the panel is open.
+Dragging it up pulls the bar, the roll and the sliders over the preview, and the
+square gives up exactly what they gain, which keeps the frame square while it
+shrinks. The drag stops at 45% of the width — past that the viewfinder has
+stopped being one. Closing the panel hands the whole square back.
 
 ### Copy Adjustments
 
