@@ -43,12 +43,14 @@ resolution.
 | `Camera/PhotoEncoder.swift` | JPEG encoding, and the settings embedded in EXIF |
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
 | `Library/ShotStore.swift` | Every shot on disk |
+| `Library/SnapshotStore.swift` | The frames the app leaves behind when it goes away |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
 | `Views/CaptionField.swift` | The line under a frame being reviewed |
 | `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the favourites |
 | `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
 | `Views/DevelopPanel.swift` | The slider editor |
 | `Views/FavoritesList.swift` | The kept frames, and the heart that opens them |
+| `Views/SnapshotGrid.swift` | The background snapshots, and the starburst that opens them |
 | `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
 | `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
@@ -234,8 +236,10 @@ came off the shutter.
 ## The action bar
 
 Under all of that, and directly above the roll, is the app's one row of
-buttons, left-aligned and evenly spaced: **Develop**, the heart that opens the
-favourites, and four filled squares that show and hide the roll itself.
+buttons: **Develop**, the heart that opens the favourites, and four filled
+squares that show and hide the roll itself, left-aligned and evenly spaced. A
+starburst sits alone at the right, for the frames the app left behind while it
+was away.
 
 The bar and the roll are attached. Tapping **Develop** lifts the pair to just
 under the frame and fills in the sliders beneath them, while everything to do
@@ -244,8 +248,9 @@ leaves upward and slides in behind the frame. Tapping it again puts it all back,
 and so does **Done**: it is one switch, in one place, and it reads as lit while
 the sliders are open.
 
-The right of the bar is what grows on the way up — **Reset**, the menu of things
-the panel can do, and **Done** — along with a drag handle at its centre, all of
+The rest of the right of the bar is what grows on the way up — **Reset**, the
+menu of things the panel can do, and **Done**, arriving to the left of the
+starburst rather than pushing it off the end — along with a drag handle at its centre, all of
 it fading in around the three buttons on the left, which never move. The menu
 sits between the two words rather than beside the title, since loading a look,
 saving one and taking the frame are of a piece with Reset and Done and none of
@@ -296,6 +301,54 @@ The list is a second window onto the same roll rather than a second roll —
 nothing lives in it that isn't in the store, and keeping is one flag in the
 shot's sidecar. Opening a frame from it while the develop panel is up loads it
 under the sliders, the way tapping it in the roll does.
+
+## Background snapshots
+
+*Experimental.*
+
+Put a camera app down without closing it and come back an hour later, and the
+preview is still showing the frame it froze on when you left — a photograph of
+wherever you were standing when the phone went in your pocket. Every camera app
+does this. None of them keeps it: the frame is thrown away the moment the
+session restarts.
+
+Snap keeps it. The starburst at the right of the action bar opens them as a
+grid — a wall of squares, which is the right way to look at frames nobody
+composed and nobody wrote anything about. Tap one to see it whole with the
+moment it was left behind under it, long-press for **Share JPEG** or **Delete**,
+**Clear** empties the lot.
+
+They live in `Documents/Snapshots`, one JPEG each, apart from the roll and never
+written to the camera roll: these are not photographs anybody took, and they
+shouldn't turn up in a year's worth of ones that were. They carry their look in
+EXIF like everything else the app writes, since they were graded on the way to
+the screen. Two hundred are kept and then the oldest go — one lands every time
+the app is put down with the preview up, which over a month is a great many
+frames of the inside of a pocket, and an experiment shouldn't quietly fill a
+phone.
+
+### Why it is done in two halves
+
+The frame is *rendered* when the app goes inactive and *written* when it goes to
+the background, which are two different moments on purpose.
+
+What the renderer is holding is a recipe rather than a picture — the graded
+frame is a chain of Core Image filters that costs nothing until something draws
+it. Drawing it is Metal, and an app that reaches for the GPU once it is in the
+background has its command buffer killed. Inactive is still the foreground: it
+is the same moment an app blurs itself before the switcher takes its picture,
+and rendering there is allowed. So the JPEG is encoded on the way out and held
+in memory, and going to the background is only a file write.
+
+Which also gives the feature its cancel. Inactive happens for anything that
+takes focus — a notification, the control centre, a glance at the switcher — and
+most of those come straight back. Returning to active throws the held frame
+away, so only actually leaving keeps one.
+
+A frame is kept only when the live preview is what is on screen. A saved frame
+in the viewer freezes as itself, and that one is already in the roll; a negative
+under the sliders freezes as a re-development of a frame that is also already in
+the roll. Neither is a moment about to be lost.
 
 ## Sub-profiles
 

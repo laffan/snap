@@ -17,6 +17,7 @@ struct CameraView: View {
     @State private var isDeveloping = false
     @State private var isLoadingLook = false
     @State private var isShowingFavorites = false
+    @State private var isShowingSnapshots = false
     /// Whether the roll is showing under the bar. The grid button on the bar
     /// owns this; it starts up, since the roll is most of what the bar is for.
     @State private var isShowingStrip = true
@@ -140,9 +141,23 @@ struct CameraView: View {
         .onAppear { camera.start() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
-            case .active:     camera.start()
-            case .background: camera.stop()
-            default:          break
+            case .active:
+                // Back without ever having gone: whatever was held on the way
+                // out is not a frame the app left behind.
+                camera.discardBackgroundSnapshot()
+                camera.start()
+            case .inactive:
+                // The frame that is about to freeze on screen, rendered while
+                // rendering is still allowed. A saved frame in the viewer is
+                // what freezes instead, and that one is already in the roll.
+                if viewing == nil { camera.prepareBackgroundSnapshot() }
+            case .background:
+                // Written here, where there is no GPU to reach for — and before
+                // the session stops, which is what clears the renderer.
+                camera.commitBackgroundSnapshot()
+                camera.stop()
+            default:
+                break
             }
         }
         .sheet(item: $camera.pendingTitle) { shot in
@@ -169,6 +184,10 @@ struct CameraView: View {
                           onToggleFavorite: toggleFavorite,
                           onCommitCaption: { shot, caption in setCaption(caption, for: shot) },
                           onClose: { isShowingFavorites = false })
+        }
+        .sheet(isPresented: $isShowingSnapshots) {
+            SnapshotGrid(store: camera.snapshots,
+                         onClose: { isShowingSnapshots = false })
         }
         .sheet(item: $share) { ShareSheet(urls: $0.urls) }
         .alert("Something went wrong",
@@ -571,6 +590,7 @@ struct CameraView: View {
     /// change.
     private func actionBar(liftLimit: CGFloat) -> some View {
         ActionBar(store: store,
+                  snapshots: camera.snapshots,
                   isDeveloping: isDeveloping,
                   canDevelop: canDevelop,
                   isBusy: camera.isCapturing,
@@ -580,6 +600,7 @@ struct CameraView: View {
                   liftLimit: liftLimit,
                   onToggleDevelop: { setEditing(!isDeveloping) },
                   onFavorites: { isShowingFavorites = true },
+                  onSnapshots: { isShowingSnapshots = true },
                   onToggleStrip: toggleStrip,
                   onLoad: { isLoadingLook = true },
                   onSave: { primaryAction(titled: true) },

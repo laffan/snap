@@ -52,6 +52,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// camera roll, which is what the film strip reads from.
     let store = ShotStore()
 
+    /// The frames left frozen on screen by walking away. Kept apart from the
+    /// roll and never sent to the camera roll — see `SnapshotStore`.
+    let snapshots = SnapshotStore()
+
     /// Set once the session is configured: true when the sensor can hand us
     /// Bayer RAW.
     @Published private(set) var isRAWAvailable = false
@@ -808,6 +812,54 @@ final class CameraModel: NSObject, ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.negativeStatus = status }
 
         return (embedded ?? squared ?? data, settings)
+    }
+
+    // MARK: - The frame left behind
+
+    /// Rendered when the app loses focus, written only if it actually goes
+    /// away. See `prepareBackgroundSnapshot`.
+    private var pendingSnapshot: Data?
+
+    /// Renders whatever the preview is showing, and holds it.
+    ///
+    /// The frame the renderer has is the one iOS will leave frozen on screen
+    /// for as long as the app is in the background, so this is not a new
+    /// photograph — it is the one that was going to be thrown away when the
+    /// session restarts.
+    ///
+    /// It has to happen *here*, on the way to inactive, rather than on the way
+    /// to the background: the graded frame is a recipe until something draws
+    /// it, drawing it is Metal, and an app that touches the GPU once it is in
+    /// the background gets its command buffer killed. Inactive is still the
+    /// foreground — it is the same moment an app blurs itself before the
+    /// switcher takes its picture.
+    ///
+    /// Nothing is kept while a negative is under the sliders: what freezes then
+    /// is a re-development of a frame already in the roll, not a moment about
+    /// to be lost.
+    func prepareBackgroundSnapshot() {
+        guard state == .running,
+              versionSource == nil,
+              let image = renderer.currentImage else { return }
+
+        pendingSnapshot = try? PhotoEncoder.jpeg(from: image,
+                                                 profile: look.profile,
+                                                 sourceMetadata: placed([:]),
+                                                 context: stillContext)
+    }
+
+    /// Writes the held frame, now that the app is going. Files only — no GPU
+    /// work happens here.
+    func commitBackgroundSnapshot() {
+        guard let jpeg = pendingSnapshot else { return }
+        pendingSnapshot = nil
+        try? snapshots.add(jpeg: jpeg)
+    }
+
+    /// Coming back without ever having left — a notification, the control
+    /// centre, a glance at the switcher — is not leaving a frame behind.
+    func discardBackgroundSnapshot() {
+        pendingSnapshot = nil
     }
 
     /// Saves the preview frame itself, skipping the RAW loop entirely.

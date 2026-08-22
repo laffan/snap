@@ -23,6 +23,9 @@ struct ActionBar: View {
 
     /// For the heart, which lights only when there is something kept.
     @ObservedObject var store: ShotStore
+    /// For the starburst, which lights only when the app has left something
+    /// behind.
+    @ObservedObject var snapshots: SnapshotStore
 
     var isDeveloping: Bool
     /// False when the frame in the viewer has no negative to develop.
@@ -40,6 +43,7 @@ struct ActionBar: View {
 
     var onToggleDevelop: () -> Void
     var onFavorites: () -> Void
+    var onSnapshots: () -> Void
     var onToggleStrip: () -> Void
     var onLoad: () -> Void
     var onSave: () -> Void
@@ -55,6 +59,10 @@ struct ActionBar: View {
                 stripToggle
 
                 Spacer()
+
+                // Right-aligned, and stays there: the develop chrome arrives
+                // to its left rather than pushing it off the end.
+                snapshotsButton
 
                 if isDeveloping {
                     Button("Reset", action: onReset)
@@ -146,6 +154,25 @@ struct ActionBar: View {
         } label: {
             Label(primaryTitle, systemImage: "camera")
         }
+    }
+
+    /// The way into the frames the app left behind while it was away.
+    ///
+    /// A starburst, because that is what one of these is: not a photograph
+    /// anybody took, but the flash of wherever the phone was pointing when it
+    /// went into a pocket.
+    private var snapshotsButton: some View {
+        Button(action: onSnapshots) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.75))
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(snapshots.snapshots.isEmpty)
+        .opacity(snapshots.snapshots.isEmpty ? 0.35 : 1)
+        .accessibilityLabel("Snapshots")
     }
 
     /// Shows and hides the roll under the bar.
