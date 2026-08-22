@@ -45,10 +45,10 @@ resolution.
 | `Library/ShotStore.swift` | Every shot on disk |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
 | `Views/CaptionField.swift` | The line under a frame being reviewed |
-| `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the grid |
+| `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the favourites |
 | `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
 | `Views/DevelopPanel.swift` | The slider editor |
-| `Views/FavoritesGrid.swift` | The kept frames, and the heart that opens them |
+| `Views/FavoritesList.swift` | The kept frames, and the heart that opens them |
 | `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
 | `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
@@ -234,15 +234,22 @@ came off the shutter.
 ## The action bar
 
 Under all of that, and directly above the roll, is the app's one row of
-buttons, left-aligned: **Develop**, the heart that opens the favourites, and a
-grid that shows and hides the roll itself.
+buttons, left-aligned and evenly spaced: **Develop**, the heart that opens the
+favourites, and four filled squares that show and hide the roll itself.
 
-The bar and the roll are attached. Opening Develop lifts the pair to just under
-the frame and fills in the sliders beneath them, while everything to do with
-taking a photograph — the shutter, the modes, the lens dots, the caption —
-leaves upward and slides in behind the frame. Pressing **Done** puts it all
-back. The bar gains a chevron, a drag handle, **Reset** and **Done** on the way
-up, fading in around the buttons that were already there.
+The bar and the roll are attached. Tapping **Develop** lifts the pair to just
+under the frame and fills in the sliders beneath them, while everything to do
+with taking a photograph — the shutter, the modes, the lens dots, the caption —
+leaves upward and slides in behind the frame. Tapping it again puts it all back,
+and so does **Done**: it is one switch, in one place, and it reads as lit while
+the sliders are open.
+
+The right of the bar is what grows on the way up — **Reset**, the menu of things
+the panel can do, and **Done** — along with a drag handle at its centre, all of
+it fading in around the three buttons on the left, which never move. The menu
+sits between the two words rather than beside the title, since loading a look,
+saving one and taking the frame are of a piece with Reset and Done and none of
+them is what the word Develop means.
 
 This was two bars: Develop and the heart centred under the shutter on the
 camera screen, and the same two left-aligned in the panel's header once it
@@ -250,9 +257,9 @@ opened, with the roll laid separately under each. The same two buttons in two
 arrangements read as two different pairs, and a bar that is in one place is
 easier to learn than a bar that is in two.
 
-The grid button drops the roll out from under the bar and brings it back. With
-the panel open that is another two inches of sliders; with it closed it is a
-frame with nothing under it but the shutter. It dims rather than lighting in
+The four filled squares drop the roll out from under the bar and bring it back.
+With the panel open that is another two inches of sliders; with it closed it is
+a frame with nothing under it but the shutter. It dims rather than lighting in
 the accent when the roll is down: the one colour this interface has is spent on
 settings that change the photograph, and whether the roll is showing is not one
 of them.
@@ -260,26 +267,35 @@ of them.
 ## Favorites
 
 **Double-tap a frame to keep it** — a thumbnail in the roll, the frame in the
-viewer, a negative under the sliders, or an image in the grid. A small heart
+viewer, a negative under the sliders, or a row in the favourites. A small heart
 appears in the thumbnail's lower left corner, in the same white as the corner
 marks above it, because the two are one language rather than two. A frame open
 in the viewer says the same thing in the row below it rather than on top of it,
 opposite the label that says which of its two renderings you are looking at.
 
-The heart beside **Develop**, and beside the develop panel's own menu, opens
-the kept frames as a grid, three across. It is out while nothing is kept: an
-empty grid isn't worth a screen. Tapping a frame there opens it in the viewer;
-double-tapping lets it go, and it leaves the grid as it does.
+The heart on the action bar opens the kept frames as a list, one to a row: the
+square on the left, and on the right when it was taken, where, and whatever was
+written about it. A wall of squares is a good way to find a photograph you can
+already picture and a poor way to read a roll. The heart is out while nothing is
+kept: an empty list isn't worth a screen.
+
+Tapping a row opens that frame in the viewer. Double-tapping its square lets it
+go, and it leaves the list as it does. **Double-tapping the caption opens it for
+editing in place**, with Save and Cancel under the field — the same division
+between a tap and a double tap the roll makes, and the same caption the review
+screen writes, so it lands in the sidecar and in the file's EXIF exactly as it
+does there. A row with nothing written on it says *Add a caption*, which is
+where one gets written.
 
 A swipe in the viewer walks whichever list the frame was opened from. Come in
-from the roll and you walk the roll; come in from the grid and you stay among
-the ones you kept. Letting a frame go mid-walk hands the rest of it back to the
-roll rather than stranding the swipe.
+from the roll and you walk the roll; come in from the favourites and you stay
+among the ones you kept. Letting a frame go mid-walk hands the rest of it back
+to the roll rather than stranding the swipe.
 
-The grid is a second window onto the same roll rather than a second roll —
+The list is a second window onto the same roll rather than a second roll —
 nothing lives in it that isn't in the store, and keeping is one flag in the
-shot's sidecar. Opening a frame from the grid while the develop panel is up
-loads it under the sliders, the way tapping it in the roll does.
+shot's sidecar. Opening a frame from it while the develop panel is up loads it
+under the sliders, the way tapping it in the roll does.
 
 ## Sub-profiles
 
@@ -480,7 +496,7 @@ only that one costs a re-develop.
 ## The develop editor
 
 **Develop**, at the left of the action bar, fills everything below the bar with
-every knob the look exposes, grouped the way Lightroom groups them — Basic,
+every knob the look exposes and lights while it does, grouped the way Lightroom groups them — Basic,
 Tone Curve, Color Mixer, Calibration, RAW. Moving a slider regrades the live
 preview. Double-tap any slider to return it to neutral.
 
@@ -494,10 +510,9 @@ was already on screen and keeps no negative, so there is nothing behind that
 JPEG for the sliders to reach — the button is dim rather than misleading, and
 putting the frame down with the **X** brings it back.
 
-The panel's own actions hang off the chevron that appears beside **Develop**
-once the panel is open — the word doesn't move, it just stops being a button
-and starts being a menu. They are listed bottom-up so the capture — the one
-that ends a session at the panel — sits nearest the thumb:
+The panel's own actions hang off the save icon that appears between **Reset**
+and **Done** once the panel is open. They are listed bottom-up so the capture —
+the one that ends a session at the panel — sits nearest the thumb:
 
 | Item | Does |
 | --- | --- |

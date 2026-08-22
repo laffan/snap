@@ -11,9 +11,10 @@
 //  than the buttons: opening Develop lifts it and the roll it carries to just
 //  under the frame, and the sliders fill in beneath.
 //
-//  What the bar gains in develop mode — the menu's chevron, the handle, Reset
-//  and Done — fades in around the buttons that were already there, so nothing
-//  that was on screen has to be found again.
+//  What the bar gains in develop mode — the handle, Reset, the menu of things
+//  the panel can do, and Done — fades in around the buttons that were already
+//  there, so nothing that was on screen has to be found again. The three on the
+//  left never move.
 //
 
 import SwiftUI
@@ -37,7 +38,7 @@ struct ActionBar: View {
     @Binding var lift: CGFloat
     var liftLimit: CGFloat
 
-    var onDevelop: () -> Void
+    var onToggleDevelop: () -> Void
     var onFavorites: () -> Void
     var onToggleStrip: () -> Void
     var onLoad: () -> Void
@@ -61,10 +62,17 @@ struct ActionBar: View {
                         .foregroundStyle(.white.opacity(0.55))
                         .transition(.opacity)
 
+                    // Between the two words rather than beside the title: what
+                    // is in here — load a look, save one, take the frame — is
+                    // of a piece with Reset and Done, and none of it is what
+                    // the word Develop means.
+                    actionMenu
+                        .transition(.opacity)
+
                     Button("Done", action: onClose)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white)
-                        .padding(.leading, 16)
+                        .padding(.leading, 8)
                         .transition(.opacity)
                 }
             }
@@ -80,46 +88,41 @@ struct ActionBar: View {
         .padding(.vertical, 4)
     }
 
-    /// The button that opens the panel, and the menu it becomes once the panel
-    /// is open. Same word in the same place either way — what changes is what
-    /// pressing it does, which is what the chevron appearing says.
-    @ViewBuilder
+    /// The switch the whole panel hangs off. It opens the sliders and it closes
+    /// them again — the same tap either way, which is what a word that stays in
+    /// one place ought to mean. Lit while they are open, so the bar says which
+    /// screen you are on without a second control to read.
     private var develop: some View {
-        if isDeveloping {
-            Menu {
-                actions
-            } label: {
-                developLabel
-            }
-            .disabled(isBusy)
-            .opacity(isBusy ? 0.4 : 1)
-            .accessibilityLabel("Develop actions")
-        } else {
-            Button(action: onDevelop) { developLabel }
-                .buttonStyle(.plain)
-                .disabled(!canDevelop)
-                .opacity(canDevelop ? 1 : 0.35)
-                .accessibilityLabel("Develop")
-        }
-    }
-
-    private var developLabel: some View {
-        HStack(spacing: 6) {
+        Button(action: onToggleDevelop) {
             Text("Develop")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-
-            Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.6))
-                // Held in place on the camera screen rather than left out, so
-                // the heart beside it doesn't shuffle sideways when the panel
-                // opens.
-                .opacity(isDeveloping ? 1 : 0)
+                .foregroundStyle(.white.opacity(isDeveloping ? 1 : 0.75))
+                .padding(.vertical, 8)
+                // Ten here and ten inside each of the two round targets beside
+                // it puts an even gap between all three.
+                .padding(.trailing, 10)
+                .contentShape(Rectangle())
         }
-        .padding(.vertical, 8)
-        .padding(.trailing, 6)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .disabled(!canDevelop)
+        .opacity(canDevelop ? 1 : 0.35)
+        .accessibilityLabel("Develop")
+        .accessibilityValue(isDeveloping ? "on" : "off")
+    }
+
+    private var actionMenu: some View {
+        Menu {
+            actions
+        } label: {
+            Image(systemName: "square.and.arrow.down")
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.75))
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
+        }
+        .disabled(isBusy)
+        .opacity(isBusy ? 0.4 : 1)
+        .accessibilityLabel("Develop actions")
     }
 
     /// Everything the panel can do that isn't a slider, ordered so the capture —
@@ -152,7 +155,7 @@ struct ActionBar: View {
     /// whether the roll is showing is not one of them.
     private var stripToggle: some View {
         Button(action: onToggleStrip) {
-            Image(systemName: "square.grid.3x3")
+            Image(systemName: "square.grid.2x2.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(isStripVisible ? 0.75 : 0.3))
                 .frame(width: 32, height: 32)

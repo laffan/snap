@@ -164,9 +164,10 @@ struct CameraView: View {
                           onCancel: { isLoadingLook = false })
         }
         .sheet(isPresented: $isShowingFavorites) {
-            FavoritesGrid(store: store,
+            FavoritesList(store: store,
                           onSelect: openFromFavorites,
                           onToggleFavorite: toggleFavorite,
+                          onCommitCaption: { shot, caption in setCaption(caption, for: shot) },
                           onClose: { isShowingFavorites = false })
         }
         .sheet(item: $share) { ShareSheet(urls: $0.urls) }
@@ -577,7 +578,7 @@ struct CameraView: View {
                   primaryTitle: camera.versionSource == nil ? "Snap" : "Capture Version",
                   lift: $panelLift,
                   liftLimit: liftLimit,
-                  onDevelop: { setEditing(true) },
+                  onToggleDevelop: { setEditing(!isDeveloping) },
                   onFavorites: { isShowingFavorites = true },
                   onToggleStrip: toggleStrip,
                   onLoad: { isLoadingLook = true },
