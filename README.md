@@ -150,12 +150,12 @@ it. It used to be laid twice, once at the foot of the camera screen and once
 inside the panel, which is what let the two disagree about where the bottom of
 the screen was.
 
-Below the frame sit a narrow column of exposure modes at the left, then
-black-and-white, the shutter and **PS** across the middle, the two round
-buttons equally far from their own edge of the screen. Exposure sits at the
-right. Under the shutter is a row of dots, one per lens, widening left to right
-the way the lenses do and filled for the one in use. The modes stand in a column
-rather than a row to leave the middle of that row to the buttons.
+Below the frame sit the exposure column at the left, then black-and-white, the
+shutter and **PS** across the middle, the two round buttons equally far from
+their own edge of the screen. The develop Exposure stepper sits at the right.
+Under the shutter is a row of dots, one per lens, widening left to right
+the way the lenses do and filled for the one in use. The exposure controls stand
+in a column rather than a row to leave the middle of that row to the buttons.
 
 Exposure steps in whole stops and is the same value as the panel's Exposure
 slider — one setting reachable two ways. Holding the number between the two
@@ -431,30 +431,67 @@ and nothing sits where that button would be. The f-number was shown there for a
 while as a readout; a number that never changes doesn't earn a place among
 controls that do.
 
-**S** pins the shutter and lets ISO follow. iOS has no shutter-priority mode of
-its own: `setExposureModeCustom(duration:iso:)` fixes both. So priority is
-built on top of it — the shutter is held and ISO is nudged toward the meter,
-using `exposureTargetOffset`, which reports its error in stops, exactly the
-units ISO scales in.
+### Two pins, and the four things they mean
 
-**S/I** pins both and lets the meter drift, and says which two it is pinning:
-shutter and ISO. Selecting it borrows whatever ISO the camera had arrived at
-rather than jumping to an arbitrary number.
+The column beside the frame is four cells: **A**, the shutter, the ISO, **M**.
+The two in the middle are the settings themselves rather than letters standing
+for them — they read what the camera is actually running at, **1/250** and
+**ISO 400** — and tapping one opens the row that changes it.
 
-**A** hands both back. It is a button like the other two rather than the state
-left over when nothing is lit — leaving auto by tapping the lit mode again was
-a move you had to be told about, and it made what the column meant depend on
-what had been pressed before it.
+**Colour says who is holding it.** Yellow means that setting is pinned, grey
+means the camera is choosing it, everywhere the setting appears: the cell in the
+column, the label at the head of its row, and the chosen stop within the row.
+There is no fifth thing yellow can mean in this interface.
 
-The rows of values appear under the frame for whichever mode is deciding them —
-S shows shutter, S/I shows both — and the offered stops are trimmed to what the
-active lens and format actually accept. The screen holds both rows' worth of
-height whichever mode is lit, so choosing one reveals a row rather than pushing
-the frame, the shutter and the roll down to make space. Leaving S/I hands ISO
-back: A meters it and S moves it, so keeping the last number chosen would leave
-the readout lit over a pin that no longer exists. ISO also has a readout
-under the exposure stepper, with AUTO at the top of its list; it and the S/I row
-edit the same value.
+Each of the two is pinned or not on its own, and the *mode* is the reading of
+that pair rather than a switch of its own:
+
+| Shutter | ISO | Is |
+| --- | --- | --- |
+| camera | camera | **Auto** |
+| pinned | camera | Shutter priority |
+| camera | pinned | ISO priority |
+| pinned | pinned | **Manual** |
+
+**A** lets both go. **M** takes both, borrowing whatever the camera had arrived
+at rather than jumping to numbers nobody chose, and opens both rows. The other
+two states are reached by pinning one setting and leaving the other alone.
+
+This is a repair as much as a rearrangement. The mode used to be the thing that
+was stored, and the pins hung off it — so choosing an ISO while the mode said
+auto set a number that auto then ignored on its way past, handing the whole
+exposure back to the camera. The ISO you picked did nothing. A pin is a pin now,
+and the mode is only its name.
+
+### Neither priority is a mode iOS has
+
+`setExposureModeCustom(duration:iso:)` fixes both halves; there is nothing in
+between it and full auto. So both priorities are built the same way — pin both,
+then nudge whichever half the photographer isn't holding toward the meter, using
+`exposureTargetOffset`, which reports its error in stops.
+
+Stops are exactly the units ISO scales in, so shutter priority is a single
+multiply. Duration scales linearly with exposure, so ISO priority is the same
+multiply on the other number. `AVCaptureDevice.currentExposureDuration` and
+`currentISO` are the sentinels for "leave that half where it is", which is what
+makes a half-pinned state expressible at all.
+
+ISO priority bottoms out where the format does: a dark room at ISO 100 runs out
+of shutter before it runs out of dark, and the frame is simply under. The EV
+readout says so, which is the honest answer — quietly moving the ISO somebody
+pinned is not.
+
+### The rows
+
+Tapping the shutter cell or the ISO cell opens that setting's row under the
+frame, and tapping it again closes it; **M** opens both, **A** closes both. The
+offered stops are trimmed to what the active lens and format actually accept,
+and **AUTO** heads each row — handing that setting back is a choice like any
+other, and it used to be buried in a menu.
+
+The screen holds both rows' worth of height whether or not either is open, so
+opening one reveals a row rather than pushing the frame, the shutter and the
+roll down to make space.
 
 ### The meter, and what the preview can't tell you
 
@@ -489,12 +526,20 @@ exposure does — so tapping twice means the same as tapping once. This is a
 correction in the develop rather than in the camera; to fix it at the sensor
 instead, move the shutter or ISO row and watch the number come back to zero.
 
-The reading itself is kept off `CameraModel` on purpose. It changes several
-times a second, and anything published there invalidates the whole camera
-screen at that rate — enough to make a long-press menu flicker and swallow the
-tap that follows it. `ExposureMeter` is its own small observable, watched only
-by the readouts that want it, and it drops changes finer than a tenth of a stop
-since that is all the readout can show.
+The readings themselves are kept off `CameraModel` on purpose. They change
+several times a second, and anything published there invalidates the whole
+camera screen at that rate — enough to make a long-press menu flicker and
+swallow the tap that follows it. `ExposureMeter` is its own small observable,
+watched only by the two things that want it: the EV readout, and the exposure
+column, which redraws four small cells rather than a screen.
+
+It carries three numbers — the offset, and what the camera has actually settled
+on for ISO and for shutter — and all three are read off the device rather than
+remembered from the last thing the app set, which is what makes the two cells
+right in auto as well as by hand. Each drops changes finer than it can show: a
+tenth of a stop for the offset, a whole number for ISO, and for the shutter a
+sixteenth of a stop, since the difference between 1/60 and 1/61 is not worth a
+redraw and the difference between 1" and 1/2" is the same size.
 
 Video HDR is switched off for the same reason. Left on, the video stream gets
 local tone mapping the still explicitly does not, so the preview would show

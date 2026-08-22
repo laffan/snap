@@ -30,6 +30,12 @@ struct CameraView: View {
     /// True while a caption is being typed, which is when the square gives up
     /// height to the keyboard.
     @State private var isCaptioning = false
+    /// Which of the two exposure rows are open. They are opened by the buttons
+    /// beside the frame that show what those settings currently are, rather
+    /// than appearing with a mode — a pinned setting and a shown row are
+    /// different questions.
+    @State private var isShowingShutterRow = false
+    @State private var isShowingISORow = false
     /// True while the viewer is being held down to show the negative.
     @State private var showsRAW = false
     /// Where focus is pinned, in the preview's own coordinates.
@@ -52,14 +58,14 @@ struct CameraView: View {
         case favorites
     }
 
-    /// One cell of the lens column and of the mode column beside it, so the two
-    /// stay level whatever the font does.
-    private static let controlCellHeight: CGFloat = 30
+    /// One cell of the lens column and of the exposure column beside it, so the
+    /// two stay level whatever the font does. Not private: the exposure column
+    /// is its own view now and builds its cells from the same number.
+    static let controlCellHeight: CGFloat = 30
 
-    /// The mode column is the tallest thing in the control row: one cell per
-    /// mode.
-    private static let controlColumnHeight =
-        CameraView.controlCellHeight * CGFloat(ExposureMode.allCases.count)
+    /// The exposure column is the tallest thing in the control row: auto, the
+    /// shutter, the ISO, manual.
+    private static let controlColumnHeight = CameraView.controlCellHeight * 4
 
     /// What the same row needs while a saved frame is up, which is the X's
     /// touch target and nothing else.
@@ -466,13 +472,16 @@ struct CameraView: View {
                 ShotInfoBar(source: infoSource(for: viewing))
                     .padding(.horizontal, 14)
                     .padding(.top, 2)
-            } else if camera.exposureMode != .auto {
-                ValueRow(label: "S",
-                         values: camera.shutterSpeeds,
-                         title: { $0.label },
-                         selection: $camera.shutterSpeed)
+            } else {
+                if isShowingShutterRow {
+                    ValueRow(label: "S",
+                             values: camera.shutterSpeeds,
+                             title: { $0.label },
+                             selection: $camera.shutterSpeed)
+                        .transition(.opacity)
+                }
 
-                if camera.exposureMode == .manual {
+                if isShowingISORow {
                     ValueRow(label: "ISO",
                              values: camera.isoOptions.map(ISOChoice.init),
                              title: { ISOSetting.label($0.value) },
@@ -480,6 +489,7 @@ struct CameraView: View {
                                 get: { camera.iso.map(ISOChoice.init) },
                                 set: { camera.iso = $0?.value }
                              ))
+                        .transition(.opacity)
                 }
             }
         }
@@ -557,70 +567,57 @@ struct CameraView: View {
                 // the X on its own: none of it applies to a photograph that
                 // has already been taken.
                 HStack(alignment: .center) {
-                    exposureModeColumn
+                    exposureColumn
 
                     Spacer()
 
-                    VStack(spacing: 4) {
-                        ExposureControl(look: camera.look)
-                        isoPicker
-                    }
+                    ExposureControl(look: camera.look)
                 }
                 .padding(.horizontal, 14)
             }
         }
-        // The live row is held to the height of the mode column, the tallest
-        // thing in it, so nothing moves as modes come and go. A saved frame
+        // The live row is held to the height of the exposure column, the
+        // tallest thing in it, so nothing moves as the rows come and go. A saved frame
         // needs only the X, and the height it hands back goes to the caption.
         .frame(maxWidth: .infinity,
                minHeight: viewing == nil ? CameraView.controlColumnHeight : CameraView.closeRowHeight)
     }
 
-    /// A, S and S/I — the three that mean anything on a fixed iris, see
-    /// ExposureSettings. A is a mode like the others rather than the absence of
-    /// one: leaving by tapping the lit button was a hidden move, and it made
-    /// the row's state depend on what had been tapped before.
+    /// The exposure column: auto, the shutter, the ISO, manual.
     ///
-    /// Stacked rather than laid across, which keeps this column narrow enough
-    /// to leave the row's outer thirds to the two round buttons.
-    private var exposureModeColumn: some View {
-        VStack(spacing: 0) {
-            ForEach(ExposureMode.allCases) { mode in
-                Button {
-                    camera.exposureMode = mode
-                } label: {
-                    Text(mode.label)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(camera.exposureMode == mode ? Color.snapAccent : .white.opacity(0.75))
-                        // A fixed cell, so the column's height is a number this
-                        // file knows rather than whatever the font decides.
-                        .frame(width: 30, height: CameraView.controlCellHeight)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .animation(.easeOut(duration: 0.12), value: camera.exposureMode)
+    /// Stacked rather than laid across, which keeps it narrow enough to leave
+    /// the row's outer thirds to the two round buttons.
+    private var exposureColumn: some View {
+        ExposureColumn(camera: camera,
+                       meter: camera.meter,
+                       onShutter: { toggleRow(shutter: true) },
+                       onISO: { toggleRow(shutter: false) },
+                       onAuto: {
+                           camera.releaseExposure()
+                           withAnimation(.easeOut(duration: 0.15)) {
+                               isShowingShutterRow = false
+                               isShowingISORow = false
+                           }
+                       },
+                       onManual: {
+                           camera.pinExposure()
+                           withAnimation(.easeOut(duration: 0.15)) {
+                               isShowingShutterRow = true
+                               isShowingISORow = true
+                           }
+                       })
     }
 
-    /// ISO, under the exposure stepper. AUTO sits at the top of the list.
-    private var isoPicker: some View {
-        Menu {
-            Button("AUTO") { camera.iso = nil }
-            ForEach(camera.isoOptions, id: \.self) { value in
-                Button(ISOSetting.label(value)) { camera.iso = value }
+    /// A value button opens the row that changes it, and closes it again. What
+    /// the button shows is the setting; what the row does is choose it.
+    private func toggleRow(shutter: Bool) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            if shutter {
+                isShowingShutterRow.toggle()
+            } else {
+                isShowingISORow.toggle()
             }
-        } label: {
-            Text(ISOSetting.label(camera.iso))
-                .font(.system(size: 11, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(camera.iso == nil ? .white.opacity(0.5) : Color.snapAccent)
-                .frame(minWidth: 34)
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("ISO")
     }
 
     private func viewerAction(_ symbol: String,
@@ -1073,6 +1070,86 @@ private struct ExposureMeterReadout: View {
         .animation(.easeOut(duration: 0.15), value: magnitude >= 1.5)
         .accessibilityLabel("Exposure meter")
         .accessibilityHint("Applies the reading to the exposure setting")
+    }
+}
+
+/// Auto, the shutter, the ISO, manual — the four cells beside the frame.
+///
+/// The two in the middle are the settings themselves rather than letters
+/// standing for them: they read what the camera is actually running at, and
+/// they say which of the two the photographer is holding by their colour —
+/// yellow for pinned, grey for the camera's. Tapping one opens the row that
+/// changes it.
+///
+/// Auto lets both go; manual takes both, wherever the camera had them. Neither
+/// is ever yellow: yellow means a setting is being held, and those two are
+/// about what is holding it.
+///
+/// Watches the meter itself, so a camera that moves its ISO four times a second
+/// redraws four small cells rather than the whole screen.
+private struct ExposureColumn: View {
+
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var meter: ExposureMeter
+
+    var onShutter: () -> Void
+    var onISO: () -> Void
+    var onAuto: () -> Void
+    var onManual: () -> Void
+
+    /// Wide enough for "1/8000" and for "ISO 6400", and no wider — the middle
+    /// of the row belongs to the shutter and the two discs beside it.
+    private static let width: CGFloat = 58
+
+    private var shutterLabel: String {
+        camera.shutterSpeed?.label ?? ShutterSpeed.label(forSeconds: meter.duration)
+    }
+
+    private var isoLabel: String {
+        "ISO " + ISOSetting.label(camera.iso ?? meter.iso)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            mode("A", isOn: camera.exposureMode == .auto, action: onAuto)
+            value(shutterLabel, isPinned: camera.shutterSpeed != nil, action: onShutter)
+            value(isoLabel, isPinned: camera.iso != nil, action: onISO)
+            mode("M", isOn: camera.exposureMode == .manual, action: onManual)
+        }
+        .animation(.easeOut(duration: 0.12), value: camera.exposureMode)
+    }
+
+    private func mode(_ title: String,
+                      isOn: Bool,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(isOn ? 0.9 : 0.35))
+                // A fixed cell, so the column's height is a number CameraView
+                // knows rather than whatever the font decides.
+                .frame(width: ExposureColumn.width, height: CameraView.controlCellHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(isOn ? "on" : "off")
+    }
+
+    private func value(_ title: String,
+                       isPinned: Bool,
+                       action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(isPinned ? Color.snapAccent : .white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: ExposureColumn.width, height: CameraView.controlCellHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(isPinned ? "set by hand" : "set by the camera")
     }
 }
 

@@ -122,33 +122,65 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: - Exposure
 
-    @Published var exposureMode: ExposureMode = .auto {
-        didSet {
-            guard exposureMode != oldValue else { return }
-            switch exposureMode {
-            case .manual:
-                // Manual needs a number to hold; borrow whatever the camera had
-                // arrived at rather than jumping to an arbitrary one.
-                if iso == nil { iso = meter.iso }
-            case .auto, .shutter:
-                // ISO is the camera's to decide in both of these — auto meters
-                // everything, and shutter priority moves ISO itself. Keeping
-                // the last chosen number would leave the readout lit, claiming
-                // a pin that is no longer there.
-                iso = nil
-            }
-            applyExposure()
+    /// The pinned shutter, or nil while the camera is choosing it.
+    @Published var shutterSpeed: ShutterSpeed? {
+        didSet { if !isAdjustingExposure { applyExposure() } }
+    }
+
+    /// The pinned ISO, or nil while the camera is choosing it.
+    @Published var iso: Float? {
+        didSet { if !isAdjustingExposure { applyExposure() } }
+    }
+
+    /// True while both pins are being moved together, so the device is
+    /// configured once for the pair rather than once per half.
+    private var isAdjustingExposure = false
+
+    /// Which of the two the photographer is holding — read from the pins rather
+    /// than set alongside them.
+    ///
+    /// This used to be a stored mode that owned the pins, and owning them is
+    /// what broke ISO: choosing one while the mode said auto set a number the
+    /// mode then ignored, because auto handed the whole exposure back to the
+    /// camera on its way past. A pin is a pin now. Pinning ISO on its own means
+    /// ISO priority, which iOS does not offer either — see `correctShutter`.
+    var exposureMode: ExposureMode {
+        switch (shutterSpeed != nil, iso != nil) {
+        case (false, false): return .auto
+        case (true, false):  return .shutterPriority
+        case (false, true):  return .isoPriority
+        case (true, true):   return .manual
         }
     }
 
-    /// The chosen shutter. Nil in auto.
-    @Published var shutterSpeed: ShutterSpeed? {
-        didSet { applyExposure() }
+    /// Hands both back to the camera.
+    func releaseExposure() {
+        guard shutterSpeed != nil || iso != nil else { return }
+        adjustExposure {
+            shutterSpeed = nil
+            iso = nil
+        }
     }
 
-    /// The chosen ISO, or nil for AUTO.
-    @Published var iso: Float? {
-        didSet { applyExposure() }
+    /// Pins both, wherever the camera has them — borrowing what it arrived at
+    /// rather than jumping to a number nobody chose.
+    func pinExposure() {
+        guard shutterSpeed == nil || iso == nil else { return }
+        adjustExposure {
+            if shutterSpeed == nil {
+                shutterSpeed = ShutterSpeed.nearest(toSeconds: meter.duration, in: shutterSpeeds)
+            }
+            if iso == nil {
+                iso = ISOSetting.nearest(to: meter.iso, in: isoOptions)
+            }
+        }
+    }
+
+    private func adjustExposure(_ change: () -> Void) {
+        isAdjustingExposure = true
+        change()
+        isAdjustingExposure = false
+        applyExposure()
     }
 
     @Published private(set) var shutterSpeeds: [ShutterSpeed] = []
@@ -159,7 +191,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// rebuilding the whole screen under any menu that happened to be open.
     let meter = ExposureMeter()
 
-    private var meterObserver: AnyCancellable?
+    private var meterObservers: Set<AnyCancellable> = []
 
     /// The portrait frame size as delivered, needed to turn a point on screen
     /// into one the device understands. Written on the capture queue.
@@ -363,14 +395,19 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    /// Pushes the current mode to the device.
+    /// Pushes the pins to the device.
     ///
-    /// iOS has no shutter-priority mode of its own: `setExposureModeCustom`
-    /// fixes both the shutter and the ISO. So priority is built on top of it —
-    /// the shutter is pinned and ISO is nudged to follow the meter, which is
-    /// what `startMetering` does. Manual pins both and lets the meter drift.
+    /// iOS offers auto or custom and nothing between: `setExposureModeCustom`
+    /// fixes the shutter *and* the ISO. So either priority is built on top of
+    /// custom — both are pinned, and whichever one the photographer isn't
+    /// holding gets nudged toward the meter afterwards, which is what
+    /// `correctExposure` does. Only with neither pinned does the device go back
+    /// to metering for itself.
+    ///
+    /// `currentExposureDuration` and `currentISO` are the sentinels for "leave
+    /// that half where it is", which is what makes the half-pinned states
+    /// possible at all.
     private func applyExposure() {
-        let mode = exposureMode
         let speed = shutterSpeed
         let chosenISO = iso
 
@@ -381,54 +418,84 @@ final class CameraModel: NSObject, ObservableObject {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
 
-                switch mode {
-                case .auto:
+                if speed == nil, chosenISO == nil {
                     if device.isExposureModeSupported(.continuousAutoExposure) {
                         device.exposureMode = .continuousAutoExposure
                     }
-
-                case .shutter, .manual:
-                    guard device.isExposureModeSupported(.custom) else { return }
-
-                    let duration = speed?.duration ?? AVCaptureDevice.currentExposureDuration
-                    let isoValue = chosenISO.map {
-                        min(max($0, device.activeFormat.minISO), device.activeFormat.maxISO)
-                    } ?? device.iso
-
-                    device.setExposureModeCustom(duration: duration, iso: isoValue)
+                    return
                 }
+
+                guard device.isExposureModeSupported(.custom) else { return }
+
+                let duration = speed?.duration ?? AVCaptureDevice.currentExposureDuration
+                let isoValue = chosenISO.map {
+                    min(max($0, device.activeFormat.minISO), device.activeFormat.maxISO)
+                } ?? AVCaptureDevice.currentISO
+
+                device.setExposureModeCustom(duration: duration, iso: isoValue)
             } catch {
                 return
             }
         }
     }
 
-    /// One subscription to the meter, serving both readers.
+    /// What the camera is doing, watched in three places at once.
     ///
     /// `exposureTargetOffset` is how far the current exposure sits from what
-    /// the meter wants, in stops. That is the number a photographer needs when
-    /// driving the exposure by hand, and it is also what shutter priority
-    /// corrects against — ISO scales in the same units, so the correction is a
-    /// single multiply. Keeping it as one always-on subscription means there is
-    /// no tracker lifecycle to get wrong when the mode or the lens changes.
+    /// the meter wants, in stops — the number a photographer needs when driving
+    /// the exposure by hand, and the one either priority corrects against.
+    /// `iso` and `exposureDuration` are what the camera has actually settled
+    /// on, which is what the two buttons show while it is the camera choosing
+    /// and where pinning starts from when it takes over. All three are read off
+    /// the device rather than remembered from the last thing this code set, so
+    /// they are right in auto as well.
+    ///
+    /// Rebuilt rather than kept across a lens swap: the old subscriptions are
+    /// watching a device that is no longer running.
     private func startMetering() {
-        // Rebuilt rather than kept: after a lens swap the old subscription is
-        // watching a device that is no longer running.
-        meterObserver = nil
+        meterObservers.removeAll()
         guard let device = videoDevice else { return }
 
-        meterObserver = device.publisher(for: \.exposureTargetOffset)
+        device.publisher(for: \.exposureTargetOffset)
             .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] offset in
                 guard let self else { return }
                 self.meter.report(offset: offset)
-                // Manual holds its own ISO; nothing should be moving it.
-                if self.exposureMode == .shutter { self.correctISO(by: offset) }
+                self.correctExposure(by: offset)
             }
+            .store(in: &meterObservers)
+
+        device.publisher(for: \.iso)
+            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] value in self?.meter.report(iso: value) }
+            .store(in: &meterObservers)
+
+        device.publisher(for: \.exposureDuration)
+            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] duration in
+                self?.meter.report(duration: Float(CMTimeGetSeconds(duration)))
+            }
+            .store(in: &meterObservers)
     }
 
+    /// Moves whichever half the photographer isn't holding.
+    ///
+    /// With both pinned there is nothing to move and the meter is only a
+    /// reading; with neither, the device is metering for itself.
+    private func correctExposure(by offset: Float) {
+        guard abs(offset) > 0.12 else { return }
+
+        switch exposureMode {
+        case .shutterPriority: correctISO(by: offset)
+        case .isoPriority:     correctShutter(by: offset)
+        case .auto, .manual:   break
+        }
+    }
+
+    /// Shutter priority: the shutter is held and ISO is nudged toward the
+    /// meter. ISO scales in stops, which is what the offset is measured in, so
+    /// the correction is a single multiply.
     private func correctISO(by offset: Float) {
-        guard exposureMode == .shutter, abs(offset) > 0.12 else { return }
         let speed = shutterSpeed
 
         sessionQueue.async { [weak self] in
@@ -447,7 +514,44 @@ final class CameraModel: NSObject, ObservableObject {
             } catch {
                 return
             }
-            DispatchQueue.main.async { self.meter.report(iso: target) }
+        }
+    }
+
+    /// ISO priority, the same trick the other way up: the ISO is held and the
+    /// shutter is nudged. Duration scales linearly with exposure, so a stop is
+    /// a doubling, and the offset is already in stops.
+    ///
+    /// It bottoms out where the format does. A dark room at ISO 100 runs out of
+    /// shutter before it runs out of dark, and the frame is simply under —
+    /// which the EV readout says, and which is the honest answer rather than
+    /// quietly moving the ISO the photographer pinned.
+    private func correctShutter(by offset: Float) {
+        let pinnedISO = iso
+
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice,
+                  device.exposureMode == .custom else { return }
+
+            let format = device.activeFormat
+            let current = CMTimeGetSeconds(device.exposureDuration)
+            guard current > 0 else { return }
+
+            let wanted = current * pow(2, Double(offset))
+            let target = min(max(wanted, CMTimeGetSeconds(format.minExposureDuration)),
+                             CMTimeGetSeconds(format.maxExposureDuration))
+            guard target > 0, abs(log2(target / current)) > 0.05 else { return }
+
+            do {
+                try device.lockForConfiguration()
+                device.setExposureModeCustom(
+                    duration: CMTime(seconds: target, preferredTimescale: 1_000_000),
+                    iso: pinnedISO.map { min(max($0, format.minISO), format.maxISO) }
+                        ?? AVCaptureDevice.currentISO
+                )
+                device.unlockForConfiguration()
+            } catch {
+                return
+            }
         }
     }
 

@@ -22,14 +22,31 @@ struct ValueRow<Value: Identifiable & Equatable>: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            // Yellow while this setting is pinned, grey while the camera is
+            // choosing it — the same two colours the buttons beside the frame
+            // use, meaning the same thing.
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(1.1)
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(selection == nil ? .white.opacity(0.45) : Color.snapAccent)
                 .frame(width: 26, alignment: .leading)
 
             ScrollView(.horizontal) {
                 HStack(spacing: 14) {
+                    // Handing the setting back is a choice like any other, so
+                    // it sits at the head of the row rather than in a menu of
+                    // its own. Never yellow: automatic is what it means.
+                    Button {
+                        selection = nil
+                    } label: {
+                        Text("AUTO")
+                            .font(.system(size: 12, weight: selection == nil ? .semibold : .regular))
+                            .foregroundStyle(.white.opacity(selection == nil ? 0.9 : 0.45))
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
                     ForEach(values) { value in
                         let isSelected = value.id == selection?.id
 
