@@ -55,25 +55,33 @@ struct ShutterButton: View {
     }
 }
 
-/// Takes the shutter's place while a saved frame is being viewed. Same
-/// footprint, so the row doesn't shift when the two swap.
+/// Takes the shutter's place while a saved frame is being viewed.
+///
+/// Half the shutter's size, and roughly the size of PS and the black-and-white
+/// disc beside it — the shutter is big because it is aimed at without looking,
+/// and putting a photograph down is neither urgent nor blind. What it gives up
+/// goes to the caption below it, which needs room more than this does.
 struct CloseButton: View {
 
     var action: () -> Void
 
-    private let diameter: CGFloat = 81
+    private let diameter: CGFloat = 40
+    /// Drawn at 40 and touched at 44, which is the smallest target worth
+    /// offering a thumb.
+    private let target: CGFloat = 44
 
     var body: some View {
         Button(action: action) {
             ZStack {
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.75), lineWidth: 2)
+                    .strokeBorder(Color.white.opacity(0.75), lineWidth: 1.5)
                     .frame(width: diameter, height: diameter)
 
                 Image(systemName: "xmark")
-                    .font(.system(size: 24, weight: .light))
+                    .font(.system(size: 14, weight: .light))
                     .foregroundStyle(.white)
             }
+            .frame(width: target, height: target)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)

@@ -3,7 +3,8 @@
 //  Snap
 //
 //  The lower half of the screen when the develop editor is open: every knob the
-//  look exposes, grouped the way Lightroom groups them, over the roll.
+//  look exposes, grouped the way Lightroom groups them. The roll stays where it
+//  always is, on the floor of the screen below this.
 //
 //  The header carries the panel's own actions in a menu beside its title, a
 //  heart beside that, and a handle at its centre that trades preview for panel.
@@ -12,7 +13,7 @@
 import SwiftUI
 import UIKit
 
-struct DevelopPanel<Favorites: View, Strip: View>: View {
+struct DevelopPanel<Favorites: View>: View {
 
     @ObservedObject var look: LookModel
 
@@ -37,10 +38,9 @@ struct DevelopPanel<Favorites: View, Strip: View>: View {
     var onSave: () -> Void
     var onLoad: () -> Void
     var onClose: () -> Void
-    /// The heart beside the menu and the roll below the sliders, both handed
-    /// in so the panel doesn't need to know about the store.
+    /// The heart beside the menu, handed in so the panel doesn't need to know
+    /// about the store.
     @ViewBuilder var favorites: Favorites
-    @ViewBuilder var strip: Strip
 
     private var editing: (Bool) -> Void {
         { look.setInteracting($0) }
@@ -72,10 +72,8 @@ struct DevelopPanel<Favorites: View, Strip: View>: View {
             }
             .scrollIndicators(.hidden)
 
+            // The panel closes on a rule, with the roll under it.
             Divider().overlay(Color.white.opacity(0.12))
-            strip
-                .padding(.top, 8)
-                .padding(.bottom, 12)
         }
         .background(Color.black)
     }

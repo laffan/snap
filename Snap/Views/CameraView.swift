@@ -57,6 +57,10 @@ struct CameraView: View {
     private static let controlColumnHeight =
         CameraView.controlCellHeight * CGFloat(ExposureMode.allCases.count)
 
+    /// What the same row needs while a saved frame is up, which is the X's
+    /// touch target and nothing else.
+    private static let closeRowHeight: CGFloat = 44
+
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
@@ -87,23 +91,27 @@ struct CameraView: View {
                                  onSave: { primaryAction(titled: true) },
                                  onLoad: { isLoadingLook = true },
                                  onClose: { setEditing(false) },
-                                 favorites: { favoritesButton }) {
-                        roll(selection: camera.versionSource,
-                             requiresNegative: true,
-                             onSelect: selectForVersion)
-                    }
+                                 favorites: { favoritesButton })
                 } else {
                     caption
-                    Spacer(minLength: 0)
+                    // The caption keeps its distance from what is under it
+                    // however much room the screen has to spare.
+                    Spacer(minLength: 15)
                     controlRow
                     Spacer(minLength: 0)
 
                     developRow
                         .offset(y: -10)
-
-                    roll(selection: viewing, onSelect: openFromRoll)
-                        .padding(.bottom, 10)
                 }
+
+                // The roll is the floor of every screen — the camera's, the
+                // viewer's and the panel's — so that it stays where it is while
+                // everything above it changes. It used to be laid twice, once
+                // at the foot of the camera screen and once inside the panel,
+                // which is what let the two disagree about where the bottom is.
+                roll
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Color.black.ignoresSafeArea())
@@ -240,7 +248,7 @@ struct CameraView: View {
                          onCommit: { setCaption($0, for: viewing) })
                 .id(viewing.id)
                 .padding(.horizontal, 14)
-                .padding(.top, 8)
+                .padding(.top, 15)
         }
     }
 
@@ -321,17 +329,22 @@ struct CameraView: View {
         .frame(height: 22)
     }
 
-    private func roll(selection: Shot?,
-                      requiresNegative: Bool = false,
-                      onSelect: @escaping (Shot) -> Void) -> some View {
+    /// Which frame the roll outlines, and what tapping one means, is the only
+    /// thing that changes with the screen above it: a negative to put under the
+    /// sliders while the panel is open, a frame to look at otherwise.
+    private var roll: some View {
         FilmStrip(store: store,
-                  selection: selection,
-                  onSelect: onSelect,
+                  selection: isDeveloping ? camera.versionSource : viewing,
+                  onSelect: isDeveloping ? selectForVersion : openFromRoll,
                   onToggleFavorite: toggleFavorite,
                   onUseLook: useLook,
                   onShare: { share = ShareItem($0) },
                   onDelete: delete,
-                  requiresNegative: requiresNegative)
+                  requiresNegative: isDeveloping)
+            // Rebuilt when the panel opens or closes, which is what makes it
+            // scroll to the frame it opened with: the strip reveals its
+            // selection as it appears.
+            .id(isDeveloping)
     }
 
     /// How much room the value rows hold open.
@@ -389,8 +402,10 @@ struct CameraView: View {
         VStack(spacing: 4) {
             shutterRow
 
-            // Held in place but hidden while a saved frame is up, so nothing
-            // moves when the shutter becomes an X.
+            // Held in place but hidden while a saved frame is up. The dots
+            // mean nothing for a photograph already taken, and keeping their
+            // space is what stops the X sliding down into it while the row
+            // above them gives its height to the caption.
             lensPicker
                 .opacity(viewing == nil ? 1 : 0)
                 .allowsHitTesting(viewing == nil)
@@ -443,9 +458,11 @@ struct CameraView: View {
                 .padding(.horizontal, 14)
             }
         }
-        // Held to the height of the mode column so that swapping the shutter
-        // for the X, which is shorter than both, doesn't move the row.
-        .frame(maxWidth: .infinity, minHeight: CameraView.controlColumnHeight)
+        // The live row is held to the height of the mode column, the tallest
+        // thing in it, so nothing moves as modes come and go. A saved frame
+        // needs only the X, and the height it hands back goes to the caption.
+        .frame(maxWidth: .infinity,
+               minHeight: viewing == nil ? CameraView.controlColumnHeight : CameraView.closeRowHeight)
     }
 
     /// A, S and S/I — the three that mean anything on a fixed iris, see
@@ -622,7 +639,7 @@ struct CameraView: View {
     /// What sits between the bottom of the square and the bottom of the caption
     /// field: the row that names the rendering, the room the value rows hold
     /// open, the field itself, and a little air under it.
-    private static let captionReserve: CGFloat = 150
+    private static let captionReserve: CGFloat = 160
 
     /// The edge of the square.
     ///

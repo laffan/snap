@@ -140,6 +140,12 @@ in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
 took. It holds 20 at a time with **Load More** for the rest.
 
+The strip is the floor of every screen — the camera's, the viewer's and the
+develop panel's — and it is laid once, below whichever of them is up, so it
+stays exactly where it is while everything above it changes. It used to be laid
+twice, once at the foot of the camera screen and once inside the panel, which is
+what let the two disagree about where the bottom of the screen was.
+
 Below the frame sit a narrow column of exposure modes at the left, then
 black-and-white, the shutter and **PS** across the middle, the two round
 buttons equally far from their own edge of the screen. Exposure sits at the
@@ -158,12 +164,19 @@ re-applies when a negative is re-developed and travels to Lightroom as
 `crs:Exposure2012`.
 
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
-that returns to the live preview. The camera controls go with the exposure
-stepper while a saved frame is up: lens, mode and black-and-white all decide
-how the *next* photograph is taken, and none of them applies to one that
-already exists. Long-press for **Add to Favorites**, **Use Develop Settings**
-(puts that shot's settings back on the sliders), **Share JPEG**, **Share RAW**
-(only when the capture was RAW), or **Delete Image**.
+that returns to the live preview. The X is half the shutter's size, about as
+big as **PS** and the black-and-white disc beside it: the shutter is large
+because it is aimed at without looking, and putting a photograph down is
+neither urgent nor blind. The row holds the height of the mode column while the
+camera is live and only the X's own while a frame is up, and the height it
+hands back goes to the caption below it.
+
+The camera controls go with the exposure stepper while a saved frame is up:
+lens, mode and black-and-white all decide how the *next* photograph is taken,
+and none of them applies to one that already exists. Long-press for **Add to
+Favorites**, **Use Develop Settings** (puts that shot's settings back on the
+sliders), **Share JPEG**, **Share RAW** (only when the capture was RAW), or
+**Delete Image**.
 
 Under the frame, the row that names what is being shown — **JPEG** or **RAW** —
 gains a heart at its other end when the frame is one you kept. It used to sit in
@@ -241,7 +254,7 @@ roll rather than stranding the swipe.
 The grid is a second window onto the same roll rather than a second roll —
 nothing lives in it that isn't in the store, and keeping is one flag in the
 shot's sidecar. Opening a frame from the grid while the develop panel is up
-loads it under the sliders, the way tapping it in the panel's own strip does.
+loads it under the sliders, the way tapping it in the roll does.
 
 ## Exposure
 
@@ -331,7 +344,8 @@ Ending the session only puts B&W back the way it was if loading the negative
 is what turned it on.
 
 Preview frames have no negative, so they can't be re-developed — they show
-dimmed in the panel's roll, don't respond to a tap, and put **Develop** out
+dimmed in the roll while the panel is open, don't respond to a tap, and put
+**Develop** out
 while one is in the viewer. Their menu still works; they can be shared,
 deleted, or have their settings borrowed.
 
@@ -357,13 +371,13 @@ Delete is the way to reclaim it.
 
 ## Re-developing a negative
 
-The roll also lives inside the develop panel. Tapping a frame there loads its
-negative under the sliders in place of the live camera, and moving a slider
-regrades it as you go — the label under the frame reads VERSION while this is
-happening, and holding the frame peeks at the ungraded development the same way
-the saved-frame viewer does. The loaded frame is outlined in its thumbnail, and
-the strip scrolls to it when the panel opens, since a frame chosen on the way in
-may sit well down the roll. Tapping that same thumbnail again puts the negative
+The roll is still there under the develop panel, since it is under every
+screen. Tapping a frame in it loads that frame's negative under the sliders in
+place of the live camera, and moving a slider regrades it as you go — the label
+under the frame reads VERSION while this is happening, and holding the frame
+peeks at the ungraded development the same way the saved-frame viewer does. The
+loaded frame is outlined in its thumbnail, and the strip scrolls to it when the
+panel opens, since a frame chosen on the way in may sit well down the roll. Tapping that same thumbnail again puts the negative
 down: the live preview comes back under the sliders, still open.
 
 **Snap** becomes **Capture Version** while a negative is loaded, and runs the same
