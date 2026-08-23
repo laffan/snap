@@ -201,6 +201,23 @@ final class CameraModel: NSObject, ObservableObject {
     private var videoDevice: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
 
+    /// The angle the preview is pinned at, and the one the interface is built
+    /// around. Snap is portrait-only, so the frame on screen never turns.
+    private static let previewRotationAngle: CGFloat = 90
+
+    /// Which way up the phone actually is — the one thing about a photograph
+    /// that the interface being portrait-only doesn't decide.
+    ///
+    /// `RotationCoordinator` reads gravity rather than the interface, which is
+    /// what makes it work in an app whose interface never turns, and it holds
+    /// the last real reading through face-up and face-down where
+    /// `UIDevice.orientation` gives an answer no camera can use.
+    ///
+    /// Main thread only — every one of the three places that reads it is
+    /// already there — and rebuilt on a lens change, since it is tied to the
+    /// device it was made with.
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+
     /// The Bayer format to ask for, resolved at configuration time.
     private var rawPixelFormat: OSType?
 
@@ -339,17 +356,89 @@ final class CameraModel: NSObject, ObservableObject {
         session.addOutput(videoOutput)
 
         applyRotation()
+        bindRotationCoordinator(to: device)
     }
 
-    /// Snap is portrait-only, so both outputs are pinned upright. Re-applied
-    /// after a lens change, since swapping the input rebuilds the connections.
+    /// Pins the preview upright. Re-applied after a lens change, since swapping
+    /// the input rebuilds the connections.
+    ///
+    /// Only the preview. The photo output used to be pinned here alongside it,
+    /// which is what made a photograph taken with the phone on its side come
+    /// out on its side: the interface being portrait-only is a fact about the
+    /// screen, and it was being written into the file. What that connection is
+    /// set to is decided at the shutter now, by `captureRotationAngle`.
     private func applyRotation() {
-        for output in [videoOutput as AVCaptureOutput, photoOutput] {
-            guard let connection = output.connection(with: .video) else { continue }
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
-            }
+        guard let connection = videoOutput.connection(with: .video),
+              connection.isVideoRotationAngleSupported(CameraModel.previewRotationAngle) else {
+            return
         }
+        connection.videoRotationAngle = CameraModel.previewRotationAngle
+    }
+
+    /// Points the coordinator at the device now in use.
+    ///
+    /// Handed the device rather than reading `videoDevice`, because this is
+    /// called from the session queue and read from the main one, and the
+    /// device is the only thing that has to cross.
+    private func bindRotationCoordinator(to device: AVCaptureDevice) {
+        DispatchQueue.main.async { [weak self] in
+            self?.rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: device,
+                                                                            previewLayer: nil)
+        }
+    }
+
+    /// The rotation that puts a capture the right way up whichever way up the
+    /// phone is holding it. Main thread.
+    ///
+    /// Falls back to the preview's own angle, which is what every capture used
+    /// before this was asked — a phone held in portrait is the case where the
+    /// two agree anyway.
+    private var captureRotationAngle: CGFloat {
+        rotationCoordinator?.videoRotationAngleForHorizonLevelCapture
+            ?? CameraModel.previewRotationAngle
+    }
+
+    /// Set immediately before the shutter rather than once at setup: it is a
+    /// reading of where the phone is at the moment the photograph is taken, and
+    /// a stale one would be worse than never having asked.
+    private func applyCaptureRotation(_ angle: CGFloat) {
+        guard let connection = photoOutput.connection(with: .video),
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        connection.videoRotationAngle = angle
+    }
+
+    /// Turns a frame taken off the preview the way the photo output turns one
+    /// taken off the sensor.
+    ///
+    /// The preview is pinned to portrait and a capture no longer is, so a frame
+    /// saved straight from the screen would be the one photograph in the app
+    /// that still came out sideways. The difference between the two angles is
+    /// the quarter turn it needs — and a quarter turn of a centred square is
+    /// the same square, so nothing is reframed, only turned.
+    ///
+    /// Both angles are measured the same way round from the sensor's own
+    /// orientation, so the turn is simply the difference. Hold the phone with
+    /// its top edge to the left and the world arrives in the preview with its
+    /// own top toward the right-hand edge — a quarter turn anticlockwise from
+    /// upright, and the capture angle sits a quarter turn below the preview's
+    /// to say so.
+    private func uprighted(_ image: CIImage) -> CIImage {
+        let turn = (Int(captureRotationAngle.rounded())
+                    - Int(CameraModel.previewRotationAngle) + 360) % 360
+
+        let orientation: CGImagePropertyOrientation
+        switch turn {
+        case 90: orientation = .right
+        case 180: orientation = .down
+        case 270: orientation = .left
+        default: return image
+        }
+
+        // Back to the origin afterwards, so a turned frame has the same extent
+        // a squared one does and everything downstream can go on assuming it.
+        let turned = image.oriented(orientation)
+        return turned.transformed(by: CGAffineTransform(translationX: -turned.extent.minX,
+                                                        y: -turned.extent.minY))
     }
 
     // MARK: - Lenses
@@ -608,6 +697,7 @@ final class CameraModel: NSObject, ObservableObject {
             }
 
             self.applyRotation()
+            self.bindRotationCoordinator(to: device)
             self.session.commitConfiguration()
 
             self.resolveRAWSupport()
@@ -664,8 +754,13 @@ final class CameraModel: NSObject, ObservableObject {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
 
+        // Read here, on the main thread and at the moment of the press, and
+        // carried across rather than looked up again on the session queue.
+        let angle = captureRotationAngle
+
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.applyCaptureRotation(angle)
             self.photoOutput.capturePhoto(with: self.makeSettings(), delegate: self)
         }
     }
@@ -959,7 +1054,7 @@ final class CameraModel: NSObject, ObservableObject {
               versionSource == nil,
               let image = renderer.currentImage else { return }
 
-        pendingSnapshot = try? PhotoEncoder.jpeg(from: image,
+        pendingSnapshot = try? PhotoEncoder.jpeg(from: uprighted(image),
                                                  profile: look.profile,
                                                  sourceMetadata: described([:]),
                                                  context: stillContext)
@@ -994,11 +1089,15 @@ final class CameraModel: NSObject, ObservableObject {
         flashShutter()
 
         let profile = look.profile
+        // Turned here rather than in the task below, because which way up the
+        // phone is is a main-thread reading and belongs to the moment PS was
+        // pressed, not to whenever the encode gets round to running.
+        let frame = uprighted(image)
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                let jpeg = try PhotoEncoder.jpeg(from: image,
+                let jpeg = try PhotoEncoder.jpeg(from: frame,
                                                  profile: profile,
                                                  sourceMetadata: self.described([:]),
                                                  context: self.stillContext)

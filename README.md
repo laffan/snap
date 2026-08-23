@@ -60,6 +60,53 @@ resolution.
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
 | `LaunchRoute.swift` | The one URL the app answers to, and what it means |
 
+## Which way up
+
+The interface is portrait-only and stays that way. The preview is pinned
+upright to the screen, so turning the phone turns what is in the frame — which
+is what a viewfinder that doesn't rotate looks like, and it isn't going to
+change.
+
+**The photograph is not pinned.** The photo output's rotation is read at the
+moment the shutter is pressed, off gravity rather than off the interface, so a
+frame taken with the phone on its side arrives in the camera roll the right way
+up. This is the one place where what you see is not quite what you get, and it
+is the one worth the exception: a viewfinder that leans is a viewfinder, and a
+photograph that has to be turned in Photos afterwards is a photograph somebody
+has to fix.
+
+It is read rather than remembered. `AVCaptureDevice.RotationCoordinator` gives
+`videoRotationAngleForHorizonLevelCapture`, which is a reading of where the
+phone is now — asked on the press and applied to the connection immediately
+before it, since a stale one would be worse than never having asked.
+`UIDevice.orientation` would have been the other way to ask, and it answers
+`faceUp` and `faceDown`, which are not angles a camera can use; the coordinator
+holds the last real reading through both.
+
+Nothing is reframed by this. The square is the *centred* square, and a centred
+square is the same square after a quarter turn — the frame is turned, not
+recomposed, and the edges of what you saw are the edges of what you get.
+
+### The negative turns by tag rather than by pixel
+
+A DNG holds undemosaiced sensor data, so there is no rotating one: what it
+carries is an orientation tag, and the development reads it. That happens
+already — `RAWDeveloper` has always taken the file's own orientation and handed
+it to `CIRAWFilter` — which is why a negative shot sideways and re-developed
+months later comes out the same way up as the JPEG taken beside it.
+
+The square written into the DNG's `DefaultCropOrigin`/`DefaultCropSize` is in
+sensor coordinates, which don't move when the tag changes. The crop that goes
+in the XMP instead is in Camera Raw's own terms — fractions of the frame *as
+displayed* — and swaps its axes on a quarter turn, which it already did.
+
+### PS and the frames left behind
+
+Those two come off the preview rather than off the sensor, and the preview is
+pinned. So they are turned by the difference between the two angles, which for
+a phone held in portrait is no turn at all. Otherwise **PS** would be the one
+button in the app that still produced a photograph on its side.
+
 ## RAW
 
 With **Capture RAW** on, Snap asks the sensor for Bayer RAW and develops it
