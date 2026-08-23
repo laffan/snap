@@ -182,6 +182,20 @@ final class ShotStore: ObservableObject {
     }
 
     func delete(_ shot: Shot) {
+        delete([shot])
+    }
+
+    /// Several at once, reloading the list once at the end rather than once a
+    /// frame — a wall of squares can hand over a dozen in one go.
+    func delete(_ shots: [Shot]) {
+        guard !shots.isEmpty else { return }
+        for shot in shots { removeFiles(for: shot) }
+        publishReload()
+    }
+
+    /// Everything one shot owns on disk: the frame, its negative, the sidecar
+    /// that travels with the negative, and the app's own record of it.
+    private func removeFiles(for shot: Shot) {
         try? fileManager.removeItem(at: imageURL(for: shot))
         if let rawURL = rawURL(for: shot) {
             try? fileManager.removeItem(at: rawURL)
@@ -190,7 +204,6 @@ final class ShotStore: ObservableObject {
             try? fileManager.removeItem(at: xmpURL)
         }
         try? fileManager.removeItem(at: sidecarURL(for: shot))
-        publishReload()
     }
 
     /// Edits a shot's sidecar in place.

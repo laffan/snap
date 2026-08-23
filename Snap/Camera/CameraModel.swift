@@ -622,6 +622,19 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
+    /// Back to the lens the app opens on.
+    ///
+    /// The wide one is the phone's own idea of no zoom, and it is what a
+    /// camera reached from the lock screen should be pointing through
+    /// whichever lens the last visit left selected. A no-op when it is already
+    /// the one in use, and while the lenses are still being discovered — the
+    /// session configures itself on the wide camera anyway, so a launch that
+    /// arrives before the list does is already there.
+    func selectDefaultLens() {
+        guard let wide = lenses.first(where: { $0.deviceType == .builtInWideAngleCamera }) else { return }
+        selectLens(wide)
+    }
+
     /// Bayer RAW rather than Apple ProRAW: ProRAW is already demosaiced and
     /// carries Apple's rendering, which is the thing we are trying to step
     /// around. `isAppleProRAWEnabled` stays off so this list stays Bayer.
@@ -1035,20 +1048,31 @@ final class CameraModel: NSObject, ObservableObject {
     // MARK: - Deleting
 
     /// Deletes a frame from the app and from the camera roll.
-    ///
-    /// The two copies were written together and go together: a photograph
-    /// deleted here should be gone rather than merely out of the strip. iOS
-    /// puts its own confirmation in front of the second half, and declining it
-    /// leaves the camera roll's copy standing — a decision, not a failure, so
-    /// nothing is said about it. Frames taken before the app started recording
-    /// which asset it had created have only the app's copy to remove.
     func delete(_ shot: Shot) {
-        store.delete(shot)
+        delete([shot])
+    }
 
-        guard let identifier = shot.assetIdentifier else { return }
+    /// Deletes several, which is what the grid hands over.
+    ///
+    /// The two copies of a frame were written together and go together: a
+    /// photograph deleted here should be gone rather than merely out of the
+    /// strip. iOS puts its own confirmation in front of the second half, and
+    /// declining it leaves the camera roll's copy standing — a decision, not a
+    /// failure, so nothing is said about it. Frames taken before the app
+    /// started recording which asset it had created have only the app's copy
+    /// to remove.
+    ///
+    /// The library is asked for the whole set in one request, so a dozen
+    /// frames is one confirmation rather than a dozen.
+    func delete(_ shots: [Shot]) {
+        guard !shots.isEmpty else { return }
+        store.delete(shots)
+
+        let identifiers = shots.compactMap(\.assetIdentifier)
+        guard !identifiers.isEmpty else { return }
         Task { [weak self] in
             do {
-                try await self?.library.delete(assetIdentifier: identifier)
+                try await self?.library.delete(assetIdentifiers: identifiers)
             } catch PhotoLibrarySaver.SaveError.notAuthorizedToDelete {
                 // The one outcome worth reporting: it can be fixed in Settings,
                 // where cancelling the confirmation cannot.

@@ -11,11 +11,12 @@
 //  than the buttons: opening Develop lifts it and the roll it carries to just
 //  under the frame, and the sliders fill in beneath.
 //
-//  What the bar gains in develop mode — the handle, Reset and Done — fades in
-//  at the right, around buttons that were already there and don't move.
+//  What the bar gains in develop mode — the handle and Reset — fades in at the
+//  right, around buttons that were already there and don't move.
 //
 
 import SwiftUI
+import UIKit
 
 struct ActionBar: View {
 
@@ -39,8 +40,10 @@ struct ActionBar: View {
     var onFavorites: () -> Void
     var onSnapshots: () -> Void
     var onToggleStrip: () -> Void
+    /// Holding the four squares rather than tapping them: the whole roll as a
+    /// wall, in place of the line of it under the bar.
+    var onBrowseRoll: () -> Void
     var onReset: () -> Void
-    var onClose: () -> Void
 
     var body: some View {
         ZStack {
@@ -64,12 +67,6 @@ struct ActionBar: View {
                         .foregroundStyle(.white.opacity(0.55))
                         .padding(.leading, 8)
                         .transition(.opacity)
-
-                    Button("Done", action: onClose)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white)
-                        .padding(.leading, 16)
-                        .transition(.opacity)
                 }
             }
 
@@ -88,6 +85,11 @@ struct ActionBar: View {
     /// them again — the same tap either way, which is what a word that stays in
     /// one place ought to mean. Lit while they are open, so the bar says which
     /// screen you are on without a second control to read.
+    ///
+    /// It is the only way out of the panel, too. There was a Done beside Reset
+    /// that did exactly this, which made one switch look like two — and the one
+    /// that stays in the same place whichever screen you are on is the one
+    /// worth keeping.
     private var develop: some View {
         Button(action: onToggleDevelop) {
             Text("Develop")
@@ -125,22 +127,42 @@ struct ActionBar: View {
         .accessibilityLabel("Snapshots")
     }
 
-    /// Shows and hides the roll under the bar.
+    /// Shows and hides the roll under the bar, and holds to open the whole of
+    /// it as a wall.
     ///
     /// Dimmed rather than accented while the roll is down: the one colour this
     /// interface has is spent on settings that change the photograph, and
     /// whether the roll is showing is not one of them.
+    ///
+    /// Four squares are already a picture of a grid, so the grid is what
+    /// holding them gets you: the same frames the line under the bar is
+    /// showing, laid out as a page rather than a line.
+    ///
+    /// The two gestures are an exclusive pair rather than a button with a hold
+    /// hung off it. Said any other way the tap fires as the finger lifts, and
+    /// the roll would drop out from under the wall that had just opened over
+    /// it.
     private var stripToggle: some View {
-        Button(action: onToggleStrip) {
-            Image(systemName: "square.grid.2x2.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(isStripVisible ? 0.75 : 0.3))
-                .frame(width: 32, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show the roll")
-        .accessibilityValue(isStripVisible ? "on" : "off")
+        Image(systemName: "square.grid.2x2.fill")
+            .font(.system(size: 12))
+            .foregroundStyle(.white.opacity(isStripVisible ? 0.75 : 0.3))
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
+            .gesture(
+                LongPressGesture(minimumDuration: 0.45)
+                    .onEnded { _ in
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        onBrowseRoll()
+                    }
+                    .exclusively(before: TapGesture().onEnded { onToggleStrip() })
+            )
+            // A gesture pair carries none of the meaning a button would, so
+            // both halves are said here by hand.
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Show the roll")
+            .accessibilityValue(isStripVisible ? "on" : "off")
+            .accessibilityAction(named: "Browse the roll", onBrowseRoll)
     }
 }
 

@@ -62,6 +62,14 @@ struct FilmStrip: View {
                 // it opens with a frame already chosen. Scrolling to it is what
                 // makes the outline mean anything.
                 .onAppear { reveal(selection, using: proxy) }
+                // And every time the chosen frame moves after that: a swipe
+                // across the frame above, one opened out of the favourites or
+                // the grid, a negative stepped under the sliders. The strip is
+                // where you are in the roll, so it keeps up rather than being
+                // left several frames behind whatever is on screen.
+                .onChange(of: selection?.id) { _, _ in
+                    reveal(selection, using: proxy, animated: true)
+                }
         }
         .frame(height: thumbnailEdge)
         // A shot deleted off the end shouldn't leave the window past the end
@@ -158,7 +166,11 @@ struct FilmStrip: View {
     /// off the end of this one. Asking to scroll to a row that isn't there
     /// does nothing, so the pages are added first and the scroll waits a turn
     /// for them to be laid out.
-    private func reveal(_ shot: Shot?, using proxy: ScrollViewProxy) {
+    ///
+    /// A strip that is already up moves rather than jumps — the frame it is
+    /// centring on is the one that just arrived above it, and seeing it travel
+    /// there is what says which way along the roll you went.
+    private func reveal(_ shot: Shot?, using proxy: ScrollViewProxy, animated: Bool = false) {
         guard let shot,
               let index = store.shots.firstIndex(where: { $0.id == shot.id }) else { return }
 
@@ -167,7 +179,13 @@ struct FilmStrip: View {
         }
 
         DispatchQueue.main.async {
-            proxy.scrollTo(shot.id, anchor: .center)
+            guard animated else {
+                proxy.scrollTo(shot.id, anchor: .center)
+                return
+            }
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(shot.id, anchor: .center)
+            }
         }
     }
 }

@@ -314,6 +314,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Snap-Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Snap needs the camera to compose and take photographs.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Snap records where a photograph was taken, so the develop screen can say where you were.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Snap saves the photographs you take to your camera roll.";
@@ -345,6 +346,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Snap-Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Snap needs the camera to compose and take photographs.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Snap records where a photograph was taken, so the develop screen can say where you were.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Snap saves the photographs you take to your camera roll.";

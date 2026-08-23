@@ -52,17 +52,22 @@ struct PhotoLibrarySaver {
         return created.identifier
     }
 
-    /// Removes the asset a shot became, so deleting a frame in Snap deletes
-    /// the photograph rather than only the app's copy of it.
+    /// Removes the assets some shots became, so deleting a frame in Snap
+    /// deletes the photograph rather than only the app's copy of it.
     ///
     /// iOS puts its own confirmation in front of this, and declining it throws
     /// — which is a decision rather than a failure, so the caller treats it as
     /// one. Adding photos only needs `.addOnly`; removing one needs the whole
     /// library, since it means reaching an asset rather than making one.
-    func delete(assetIdentifier: String) async throws {
+    ///
+    /// The whole set goes in one request rather than one request a frame,
+    /// since the confirmation is per request: a dozen frames ticked off the
+    /// grid should be one question rather than a dozen.
+    func delete(assetIdentifiers: [String]) async throws {
+        guard !assetIdentifiers.isEmpty else { return }
         try await requestAuthorization(for: .readWrite)
 
-        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: assetIdentifiers, options: nil)
         // Already gone — deleted from Photos, or never made it there.
         guard assets.count > 0 else { return }
 

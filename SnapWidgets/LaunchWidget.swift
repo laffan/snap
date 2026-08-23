@@ -53,5 +53,9 @@ struct LaunchWidgetView: View {
         // Required from iOS 17: a widget has to declare its own background
         // rather than painting one into its content.
         .containerBackground(.clear, for: .widget)
+        // The whole widget is one target, and this is what it opens — which is
+        // also what tells the app it was reached from the lock screen rather
+        // than resumed. See `SnapLaunch`.
+        .widgetURL(SnapLaunch.url)
     }
 }

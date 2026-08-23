@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The scheme the lock screen's two entries open. Everything else in
+	     this app's Info.plist is generated from build settings; a URL type is
+	     an array of dictionaries, which a build setting cannot say, so this
+	     one key lives in a file and the generated keys are merged into it —
+	     the same arrangement the widget's own plist has. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.laffan.snapsquarecamera</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>snapsquarecamera</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

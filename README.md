@@ -45,6 +45,7 @@ resolution.
 | `Library/ShotStore.swift` | Every shot on disk |
 | `Library/SnapshotStore.swift` | The frames the app leaves behind when it goes away |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
+| `Views/ShotGrid.swift` | The same roll as a wall, and the frames picked off it |
 | `Views/CaptionField.swift` | The line under a frame being reviewed |
 | `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the favourites |
 | `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
@@ -54,6 +55,7 @@ resolution.
 | `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
 | `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
+| `LaunchRoute.swift` | The one URL the app answers to, and what it means |
 
 ## RAW
 
@@ -227,12 +229,27 @@ it drifts vertically, so a hold that wandered still peeks at the negative
 instead of turning the page. It works the same way over a negative loaded under
 the sliders, where it walks only the frames that have a negative to develop.
 
+**The strip follows.** Whatever is in the viewer is centred in the roll below
+it — after a swipe, after a frame is opened out of the favourites or the grid,
+after a negative is stepped under the sliders. The strip is the map of where you
+are in the roll, and a map that stays where you left it is not one. It scrolls
+rather than jumps, so which way you went is visible in the going, and it loads
+another page first when the frame sits past the end of the one it is showing.
+
 **Delete Image** deletes the photograph rather than only the app's copy of it:
 the store's JPEG, its negative and its sidecar go, and so does the asset in the
 camera roll that the same capture wrote. iOS puts its own confirmation in front
 of that half, and declining it leaves the camera roll's copy standing. Frames
 taken before the app started recording which asset it had created have only the
 app's copy to remove.
+
+**Deleting the frame you are looking at stays in the viewer**, with the next one
+along the roll — the older one, the way a swipe reads — already up, or the one
+before it when what went was the last. Clearing out is done a frame at a time,
+look and decide and delete and look at the next, and being dropped back at the
+live preview after every one of those meant tapping your way back into the roll
+to carry on. Only an empty roll puts the camera back, since then there is
+nothing left to look at.
 
 Two kinds of frame are marked in the corner of their thumbnail: a dot for one
 taken with **PS**, and a square for one made in the develop screen — a
@@ -252,15 +269,18 @@ they keep to their own end.
 The bar and the roll are attached. Tapping **Develop** lifts the pair to just
 under the frame and fills in the sliders beneath them, while everything to do
 with taking a photograph — the shutter, the modes, the lens dots, the caption —
-leaves upward and slides in behind the frame. Tapping it again puts it all back,
-and so does **Done**: it is one switch, in one place, and it reads as lit while
-the sliders are open.
+leaves upward and slides in behind the frame. Tapping it again puts it all back:
+it is one switch, in one place, and it reads as lit while the sliders are open.
 
-**Reset** and **Done** fade in past the starburst on the way up, along with a
-drag handle at the bar's centre, around buttons that were already there and
-don't move. Nothing else arrives: what the panel can do lives in the panel, at
-the foot of the sliders it belongs to, and the capture is a button of its own
-under the frame.
+There was a **Done** beside Reset that did exactly that, which made one switch
+look like two — and between a word that appears at the far end of the bar only
+while the panel is open and one that sits in the same place whichever screen you
+are on, the second is the one worth keeping.
+
+**Reset** fades in past the starburst on the way up, along with a drag handle at
+the bar's centre, around buttons that were already there and don't move. Nothing
+else arrives: what the panel can do lives in the panel, at the foot of the
+sliders it belongs to, and the capture is a button of its own under the frame.
 
 This was two bars: Develop and the heart centred under the shutter on the
 camera screen, and the same two left-aligned in the panel's header once it
@@ -274,6 +294,33 @@ a frame with nothing under it but the shutter. It dims rather than lighting in
 the accent when the roll is down: the one colour this interface has is spent on
 settings that change the photograph, and whether the roll is showing is not one
 of them.
+
+**Holding them opens the whole roll as a wall.** Four squares are already a
+picture of a grid, so a grid is what holding them gets you: the same frames the
+line under the bar is showing, laid out as a page rather than a line — three
+across, newest first, wearing the same corner marks. Tapping one opens it in the
+viewer, and the strip underneath scrolls to it; with the develop panel up it
+loads under the sliders instead, the way a frame chosen from the favourites
+does. Double-tapping keeps it, as double-tapping a frame does anywhere else,
+and holding one offers keep, **Share JPEG**, **Share RAW** and **Delete Image**
+— the roll's own menu less Use Develop Settings, which belongs to the strip you
+develop from.
+
+**Select** at the top left turns the wall into checkboxes, and what is ticked
+can be shared or deleted together. Deleting several asks first and says how
+many, and the camera roll is asked for the lot in one go — iOS puts its
+confirmation in front of each request, and a dozen frames should be one question
+rather than a dozen. The wall stays in select mode with nothing ticked
+afterwards, since clearing out is rarely one pass.
+
+It is built the way the snapshots are, since it is the same shape of screen and
+the two shouldn't read as two ideas. The one thing it doesn't borrow is
+**Clear**: emptying a wall of accidents is housekeeping, and emptying a roll of
+photographs is not something to leave one tap away.
+
+The tap and the hold are said as an exclusive pair rather than as a button with
+a hold hung off it. Any other way round, the tap fires as the finger lifts, and
+the roll would drop out from under the wall that had just opened over it.
 
 ## Favorites
 
@@ -298,10 +345,13 @@ screen writes, so it lands in the sidecar and in the file's EXIF exactly as it
 does there. A row with nothing written on it says *Add a caption*, which is
 where one gets written.
 
-A swipe in the viewer walks whichever list the frame was opened from. Come in
-from the roll and you walk the roll; come in from the favourites and you stay
-among the ones you kept. Letting a frame go mid-walk hands the rest of it back
-to the roll rather than stranding the swipe.
+A swipe in the viewer walks the roll, however the frame was reached. It used to
+walk whichever list the frame was opened from — come in from the favourites and
+you stayed among the ones you kept — which meant one gesture meant two things,
+and from a short list of kept frames it meant nothing at all: two favourites,
+and a swipe had nowhere to go. The strip under the frame is the roll, it scrolls
+to whatever is up, and what a swipe moves along is the thing you can see it
+moving along.
 
 The list is a second window onto the same roll rather than a second roll —
 nothing lives in it that isn't in the store, and keeping is one flag in the
@@ -590,12 +640,18 @@ Delete is the way to reclaim it.
 
 The roll rides up with the bar when the panel opens, so it sits between the two.
 Tapping a frame in it loads that frame's negative under the sliders in place of
-the live camera, and moving a slider regrades it as you go — the label
-under the frame reads VERSION while this is happening, and holding the frame
-peeks at the ungraded development the same way the saved-frame viewer does. The
-loaded frame is outlined in its thumbnail, and the strip scrolls to it when the
-panel opens, since a frame chosen on the way in may sit well down the roll. Tapping that same thumbnail again puts the negative
-down: the live preview comes back under the sliders, still open.
+the live camera, and moving a slider regrades it as you go — the label under the
+frame reads **JPEG**, and holding the frame peeks at the ungraded development
+the same way the saved-frame viewer does, where it reads **RAW**. It used to
+read VERSION, which named the screen rather than the frame; the screen already
+says Develop at the other end of the bar, and the one question that corner
+answers — which of the frame's two renderings am I looking at — is the same
+question it answers in the viewer, so it gets the same two answers. The loaded
+frame is outlined in its thumbnail, and the strip scrolls to it — when the panel
+opens, since a frame chosen on the way in may sit well down the roll, and again
+each time a swipe steps to the next negative. Tapping that same thumbnail again
+puts the negative down: the live preview comes back under the sliders, still
+open.
 
 **Snap** becomes **Capture Version** while a negative is loaded, and runs the same
 pipeline the shutter does — develop, crop, grade, encode, square the DNG,
@@ -633,7 +689,7 @@ shutter would be if you followed the frame's middle down. It says what it will
 make rather than what it is: **CAPTURE VERSION** over a negative under the
 sliders, **CAPTURE** over the live camera.
 
-It was briefly the label in the corner — the one already reading VERSION —
+It was briefly the label in the corner — the one that used to read VERSION —
 which put an action in the one place on that row reserved for saying what
 something *is*. The corner is a label again, and the button is a button.
 
@@ -767,9 +823,27 @@ because iOS grew a second one:
   Screen, tap the button you want to replace, and pick Snap. It also appears
   in Control Centre and can be bound to the Action Button.
 
-Neither does anything but launch the app. The control's `OpenSnapIntent` has
-no body: `openAppWhenRun` is the whole mechanism, carrying the tap from the
-extension to the app.
+### Both of them open the camera, not the app
+
+Coming in from the lock screen means a photograph is about to be taken, now.
+What the app was left in the middle of last time has nothing to do with it: a
+negative under the sliders, the favourites open, an exposure pinned five stops
+out, a look three sliders from the one it ships with. So arriving this way puts
+all of it back — capture screen, auto exposure, the wide lens, the built-in
+profile, Exposure at zero — and a camera reached in a hurry is the camera you
+learned rather than the one you left. Opening the app any other way is
+untouched: coming back to it is coming back to what you were doing.
+
+An app cannot tell a launch from a resume, so the two entries say which is
+happening by carrying a URL: `snapsquarecamera://capture`, the widget as its
+`widgetURL` and the control as an `OpenURLIntent`. The control used to run an
+`AppIntent` with `openAppWhenRun` and no body, which launched the app and told
+it nothing — an intent performed out in the extension has no way to reach into
+the app and say where the tap came from, and without an app group there is
+nowhere to leave a note either. A URL is the one thing that crosses on its own.
+`LaunchRoute` in the app answers it; `SnapLaunch` in the extension writes it.
+One string in two targets, changed together, since the extension cannot see the
+app's files.
 
 The extension ships inside the app, so there is nothing extra to install — its
 bundle identifier is the app's with `.widgets` on the end, and it has to share
@@ -782,9 +856,17 @@ processed as the target's Info.plist — two build tasks writing the same output
 Keeping it outside the synchronised folder is what stops that; the same applies
 to anything else added there that isn't source.
 
+The app has one there too, `Config/Snap-Info.plist`, holding the URL type and
+nothing else. Everything else in its Info.plist is generated from build
+settings, which can say a string but not an array of dictionaries; a file and
+the generated keys merge into one plist, which is the arrangement the widget's
+own already had.
+
 ## Deliberately not here
 
-Front camera, flash, zoom, focus tap, grid. The capture screen is a preview, a
-button, and the roll.
+Front camera, flash, zoom. The capture screen is a preview, a button, and the
+roll. (Focus tap and the rule-of-thirds guide were on this list until they
+weren't; the thumbnail grid the four squares now open is a way of looking at
+the roll rather than a thing on the capture screen.)
 
 Film noise is coming back later.

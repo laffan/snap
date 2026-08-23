@@ -18,15 +18,15 @@ struct CameraView: View {
     @State private var isLoadingLook = false
     @State private var isShowingFavorites = false
     @State private var isShowingSnapshots = false
+    /// The whole roll as a wall of squares, opened by holding the four filled
+    /// squares on the bar rather than tapping them.
+    @State private var isShowingGrid = false
     /// Whether the roll is showing under the bar. The grid button on the bar
     /// owns this; it starts up, since the roll is most of what the bar is for.
     @State private var isShowingStrip = true
     @State private var share: ShareItem? = nil
     /// A saved frame being viewed in place of the live preview.
     @State private var viewing: Shot? = nil
-    /// Which list a swipe in the viewer walks: the whole roll, or the
-    /// favourites the frame was opened from.
-    @State private var viewerScope: ViewerScope = .roll
     /// True while a caption is being typed, which is when the square gives up
     /// height to the keyboard.
     @State private var isCaptioning = false
@@ -49,14 +49,6 @@ struct CameraView: View {
     @State private var panelLift: CGFloat = 0
 
     private var store: ShotStore { camera.store }
-
-    /// Where the frame in the viewer was chosen, which is the sequence a swipe
-    /// moves along. Opening a frame from the grid keeps you among the ones you
-    /// kept; opening it from the roll walks the roll.
-    private enum ViewerScope {
-        case roll
-        case favorites
-    }
 
     /// One cell of the lens column and of the exposure column beside it, so the
     /// two stay level whatever the font does. Not private: the exposure column
@@ -148,6 +140,12 @@ struct CameraView: View {
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
         .onAppear { camera.start() }
+        // The lock screen's own way in, and the one arrival that doesn't
+        // resume anything — see `openFresh`.
+        .onOpenURL { url in
+            guard LaunchRoute.isCapture(url) else { return }
+            openFresh()
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
@@ -197,6 +195,14 @@ struct CameraView: View {
         .sheet(isPresented: $isShowingSnapshots) {
             SnapshotGrid(store: camera.snapshots,
                          onClose: { isShowingSnapshots = false })
+        }
+        .sheet(isPresented: $isShowingGrid) {
+            ShotGrid(store: store,
+                     onSelect: openFromGrid,
+                     onToggleFavorite: toggleFavorite,
+                     onDelete: delete,
+                     onDeleteAll: deleteAll,
+                     onClose: { isShowingGrid = false })
         }
         .sheet(item: $share) { ShareSheet(urls: $0.urls) }
         .alert("Something went wrong",
@@ -332,9 +338,15 @@ struct CameraView: View {
     /// corner under the frame says what this is, and nothing in it does
     /// anything. What the panel's capture does belongs to a button of its own,
     /// in the middle, where an action can be aimed at.
+    ///
+    /// One question in both places, so one pair of answers: which of the
+    /// frame's two renderings is on screen. It used to read VERSION over a
+    /// negative under the sliders, which named the screen rather than the
+    /// frame — and the screen already says Develop at the other end of the
+    /// bar. Holding swaps either one to RAW.
     private var indicatorLabel: String {
         if camera.versionSource != nil {
-            return camera.isPeekingSource ? "RAW" : "VERSION"
+            return camera.isPeekingSource ? "RAW" : "JPEG"
         }
         guard viewing != nil else { return "" }
         return showsRAW ? "RAW" : "JPEG"
@@ -670,8 +682,8 @@ struct CameraView: View {
                   onFavorites: { isShowingFavorites = true },
                   onSnapshots: { isShowingSnapshots = true },
                   onToggleStrip: toggleStrip,
-                  onReset: { camera.look.reset() },
-                  onClose: { setEditing(false) })
+                  onBrowseRoll: { isShowingGrid = true },
+                  onReset: { camera.look.reset() })
     }
 
     private func toggleStrip() {
@@ -839,19 +851,28 @@ struct CameraView: View {
         camera.look.apply(store.profile(for: shot))
     }
 
-    /// Opening a frame is also what decides which list a swipe will walk.
     private func openFromRoll(_ shot: Shot) {
-        viewerScope = .roll
         viewing = shot
     }
 
     private func openFromFavorites(_ shot: Shot) {
         isShowingFavorites = false
+        open(shot)
+    }
 
-        // The panel's own strip loads a frame as the negative under the
-        // sliders, and a frame chosen from the grid while the panel is open
-        // should mean the same thing. One with no negative can't be developed,
-        // so it goes to the viewer instead, which means putting the panel down.
+    private func openFromGrid(_ shot: Shot) {
+        isShowingGrid = false
+        open(shot)
+    }
+
+    /// Opens a frame chosen from one of the two lists that cover the screen —
+    /// the favourites, or the grid — which is the same errand from both.
+    ///
+    /// The panel's own strip loads a frame as the negative under the sliders,
+    /// and a frame chosen from a list while the panel is open should mean the
+    /// same thing. One with no negative can't be developed, so it goes to the
+    /// viewer instead, which means putting the panel down.
+    private func open(_ shot: Shot) {
         if isDeveloping {
             if store.rawURL(for: shot) != nil {
                 viewing = nil
@@ -861,32 +882,27 @@ struct CameraView: View {
             setEditing(false)
         }
 
-        viewerScope = .favorites
         viewing = shot
     }
 
-    /// Moves the viewer along the list the frame was opened from.
+    /// Moves the viewer along the roll.
+    ///
+    /// One sequence, however the frame was reached: the strip under the frame
+    /// is the roll, it scrolls to whatever is up, and a swipe walks the frames
+    /// it is showing. A frame opened out of the favourites used to walk only
+    /// the ones you kept, which meant the same gesture meant two things and
+    /// went nowhere at all from a short list.
     ///
     /// Stops at either end rather than wrapping: the roll has a beginning and
     /// an end, and a swipe that jumped silently from one to the other would
     /// lose your place in it.
     private func step(by offset: Int) {
-        guard let viewing else { return }
-        let sequence = viewerSequence(containing: viewing)
-        guard let index = sequence.firstIndex(where: { $0.id == viewing.id }),
-              sequence.indices.contains(index + offset) else { return }
+        guard let viewing,
+              let index = store.shots.firstIndex(where: { $0.id == viewing.id }),
+              store.shots.indices.contains(index + offset) else { return }
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        self.viewing = sequence[index + offset]
-    }
-
-    /// The favourites while the viewer is walking those and the frame is still
-    /// one of them. Letting a frame go mid-walk hands the rest of it back to
-    /// the roll rather than stranding the swipe.
-    private func viewerSequence(containing shot: Shot) -> [Shot] {
-        guard viewerScope == .favorites else { return store.shots }
-        let favorites = store.favorites
-        return favorites.contains(where: { $0.id == shot.id }) ? favorites : store.shots
+        self.viewing = store.shots[index + offset]
     }
 
     /// The same swipe over a negative under the sliders, walking only the
@@ -921,10 +937,84 @@ struct CameraView: View {
         UIImpactFeedbackGenerator(style: kept ? .medium : .light).impactOccurred()
     }
 
+    /// Deleting the frame being reviewed moves along the roll rather than
+    /// leaving it.
+    ///
+    /// Clearing out is done one frame at a time — look, decide, delete, look at
+    /// the next — and being dropped back at the live camera after every one of
+    /// those meant tapping your way back into the roll to carry on. The viewer
+    /// stays up and the next frame arrives in it, the way a swipe would have
+    /// brought it.
     private func delete(_ shot: Shot) {
-        if viewing?.id == shot.id { viewing = nil }
+        if viewing?.id == shot.id { viewing = neighbour(of: shot) }
         if camera.versionSource?.id == shot.id { camera.endVersioning() }
         camera.delete(shot)
+    }
+
+    /// Several at once, from the grid. The frame being reviewed doesn't
+    /// survive a bulk clear-out the way it survives a single delete: a handful
+    /// of frames ticked off a wall is a different errand from walking the roll,
+    /// and it ends back at the camera.
+    private func deleteAll(_ shots: [Shot]) {
+        if let viewing, shots.contains(where: { $0.id == viewing.id }) {
+            self.viewing = nil
+        }
+        if let source = camera.versionSource, shots.contains(where: { $0.id == source.id }) {
+            camera.endVersioning()
+        }
+        camera.delete(shots)
+    }
+
+    /// Where the viewer lands when the frame in it goes.
+    ///
+    /// The next one along the roll — the older one, the way a swipe reads —
+    /// and the one before it when what went was the last. Nil only when the
+    /// roll has nothing left, which is the one case where there is nothing to
+    /// review and the camera comes back.
+    private func neighbour(of shot: Shot) -> Shot? {
+        let sequence = store.shots
+        guard let index = sequence.firstIndex(where: { $0.id == shot.id }) else { return nil }
+        if sequence.indices.contains(index + 1) { return sequence[index + 1] }
+        if sequence.indices.contains(index - 1) { return sequence[index - 1] }
+        return nil
+    }
+
+    /// Puts the app back where the lock screen expects to find it.
+    ///
+    /// The widget and the control both arrive here, and both mean the same
+    /// thing: a photograph is about to be taken, now. Whatever the last visit
+    /// was left in the middle of — a negative under the sliders, the
+    /// favourites open, an exposure pinned five stops out, a look three
+    /// sliders from the one the app ships with — none of it survives the trip.
+    /// A camera reached in a hurry has to be the camera you learned rather
+    /// than the one you left.
+    ///
+    /// An ordinary launch is untouched: coming back to the app is coming back
+    /// to what you were doing.
+    private func openFresh() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            isDeveloping = false
+            panelLift = 0
+            viewing = nil
+            isShowingShutterRow = false
+            isShowingISORow = false
+        }
+
+        isShowingFavorites = false
+        isShowingSnapshots = false
+        isShowingGrid = false
+        isLoadingLook = false
+        isCaptioning = false
+        showsRAW = false
+        focusPoint = nil
+        share = nil
+        camera.pendingTitle = nil
+
+        camera.endVersioning()
+        camera.releaseExposure()
+        camera.releaseFocus()
+        camera.selectDefaultLens()
+        camera.look.reset()
     }
 }
 
