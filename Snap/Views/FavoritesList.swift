@@ -14,18 +14,44 @@
 //  here that isn't in the store, and a frame leaves by being double-tapped
 //  again, here or anywhere else.
 //
+//  It is also where the backup lives, because the backup is about these frames
+//  and no others: the menu at the top left is where a folder is chosen, and
+//  each row says underneath its caption what that folder has of it.
+//
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct FavoritesList: View {
 
     @ObservedObject var store: ShotStore
+    @ObservedObject var backup: FavoritesBackup
 
     /// Opens the frame in the viewer, which is what the list is a way into.
     var onSelect: (Shot) -> Void
     var onToggleFavorite: (Shot) -> Void
     var onCommitCaption: (Shot, String) -> Void
     var onClose: () -> Void
+
+    /// True while the system folder picker is up.
+    @State private var isPickingFolder = false
+
+    // Explicit because the private state above would otherwise make the
+    // memberwise initializer private, putting this out of reach of CameraView —
+    // the same reason the grid and the strip have one.
+    init(store: ShotStore,
+         backup: FavoritesBackup,
+         onSelect: @escaping (Shot) -> Void,
+         onToggleFavorite: @escaping (Shot) -> Void,
+         onCommitCaption: @escaping (Shot, String) -> Void,
+         onClose: @escaping () -> Void) {
+        self.store = store
+        self.backup = backup
+        self.onSelect = onSelect
+        self.onToggleFavorite = onToggleFavorite
+        self.onCommitCaption = onCommitCaption
+        self.onClose = onClose
+    }
 
     var body: some View {
         NavigationStack {
@@ -40,15 +66,70 @@ struct FavoritesList: View {
                     rows
                 }
             }
-            .navigationTitle("Favorites")
+            .navigationTitle(backup.isCopying ? "Backing Up…" : "Favorites")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) { backupMenu }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onClose)
                 }
             }
+            // A folder rather than files: the app is not picking anything to
+            // read, it is being told where to put things. Everything after
+            // this is a bookmark to that one directory.
+            .fileImporter(isPresented: $isPickingFolder,
+                          allowedContentTypes: [.folder],
+                          allowsMultipleSelection: false) { result in
+                guard case .success(let urls) = result, let url = urls.first else { return }
+                backup.folderChosen(url)
+            }
         }
         .preferredColorScheme(.dark)
+        .onAppear { backup.paneOpened() }
+    }
+
+    // MARK: - The backup menu
+
+    /// Where the folder is chosen, changed, and given up.
+    ///
+    /// A menu rather than a row of buttons, and at the top left rather than
+    /// beside Done, because none of it is about the list you are looking at —
+    /// it is about where that list goes, which is asked once and then left
+    /// alone. It is the same corner and the same glyph the snapshots put their
+    /// own three collection-wide actions in.
+    private var backupMenu: some View {
+        Menu {
+            if let folderName = backup.folderName {
+                Section("Backing up to \(folderName)") {
+                    Button {
+                        backup.checkNow()
+                    } label: {
+                        Label("Back Up Now", systemImage: "arrow.clockwise")
+                    }
+
+                    Button {
+                        isPickingFolder = true
+                    } label: {
+                        Label("Change Folder", systemImage: "folder")
+                    }
+
+                    Button(role: .destructive) {
+                        backup.stop()
+                    } label: {
+                        Label("Stop Backing Up", systemImage: "folder.badge.minus")
+                    }
+                }
+            } else {
+                Button {
+                    isPickingFolder = true
+                } label: {
+                    Label("Set Backup Folder", systemImage: "folder.badge.plus")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .accessibilityLabel("Backup")
     }
 
     private var rows: some View {
@@ -56,10 +137,12 @@ struct FavoritesList: View {
             LazyVStack(spacing: 0) {
                 ForEach(store.favorites) { shot in
                     FavoriteRow(store: store,
+                                backup: backup,
                                 shot: shot,
                                 onSelect: { onSelect(shot) },
                                 onToggleFavorite: { onToggleFavorite(shot) },
-                                onCommitCaption: { onCommitCaption(shot, $0) })
+                                onCommitCaption: { onCommitCaption(shot, $0) },
+                                onResend: { backup.resend(shot) })
 
                     Divider().overlay(Color.white.opacity(0.08))
                 }
@@ -76,11 +159,13 @@ struct FavoritesList: View {
 private struct FavoriteRow: View {
 
     @ObservedObject var store: ShotStore
+    @ObservedObject var backup: FavoritesBackup
     let shot: Shot
 
     var onSelect: () -> Void
     var onToggleFavorite: () -> Void
     var onCommitCaption: (String) -> Void
+    var onResend: () -> Void
 
     @State private var info = ShotInfo()
     @State private var place: String? = nil
@@ -114,6 +199,9 @@ private struct FavoriteRow: View {
                     line(placeLabel, emphasis: false)
                 }
                 caption
+                BackupStatusLine(state: backup.state(for: shot),
+                                 onResend: onResend,
+                                 onRemove: onToggleFavorite)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

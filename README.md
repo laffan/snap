@@ -51,6 +51,9 @@ resolution.
 | `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
 | `Views/DevelopPanel.swift` | The slider editor |
 | `Views/FavoritesList.swift` | The kept frames, and the heart that opens them |
+| `Library/BackupFolder.swift` | The folder the user picked, and how the app gets back into it |
+| `Library/FavoritesBackup.swift` | Keeping every kept frame's files in that folder |
+| `Views/BackupStatusLine.swift` | What that folder has of a frame, under its caption |
 | `Views/SnapshotGrid.swift` | The background snapshots, and the starburst that opens them |
 | `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
 | `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
@@ -357,6 +360,99 @@ The list is a second window onto the same roll rather than a second roll —
 nothing lives in it that isn't in the store, and keeping is one flag in the
 shot's sidecar. Opening a frame from it while the develop panel is up loads it
 under the sliders, the way tapping it in the roll does.
+
+### Backing up what you kept
+
+**Set Backup Folder**, in the menu at the top left of the list, asks for one
+directory and then keeps every kept frame's files in it. The JPEG always; the
+negative and its Camera Raw sidecar as well when the capture was RAW, since
+apart the two of them mean nothing.
+
+Snap does not sync anything. It writes into a folder somebody chose in the
+system picker — iCloud Drive, Dropbox, Google Drive, anything with a file
+provider behind it — and whatever owns that folder does the carrying. That is
+the whole arrangement, and it is the reason there is no account to sign in to,
+no progress bar worth watching, and nothing to configure but the one directory.
+Choosing a folder your phone already backs up is the entire feature.
+
+The rest of the menu appears once one is set: **Back Up Now**, **Change
+Folder**, and **Stop Backing Up**, under a header naming where things are
+going. Stopping leaves the folder exactly as it is. Those files are the user's,
+in the user's folder, and an app that took them back out because a setting
+changed would not be a backup — the same reason letting a frame go doesn't
+reach in and remove its copy either.
+
+Files are renamed on the way across: `Snap-2026-03-14-172309-9F3C1A0B.jpg`. The
+store names its own files by UUID, which is the right name for a file nobody
+opens and the wrong one for a folder somebody does — this reads as a date and
+sorts as one, with the head of the UUID after it so two frames taken in the
+same second stay two files. The `.dng` and `.xmp` take the same base name,
+since Adobe finds a sidecar by matching it. And because the name is a function
+of the shot rather than of when it was sent, a frame kept, let go and kept
+again recognises its own copy instead of writing a second one.
+
+**Under each caption, the row says what the folder has of it** — *Backed up ·
+JPEG + RAW*, small and grey, next to nothing to read and nothing to do. It sits
+below the caption because the lines above it are what the photograph is and
+this is what has happened to it since, and because it is the only line in the
+row with anything to do. While files are actually going across, the pane's
+title reads **Backing Up** — said once, at the top, rather than as a spinner on
+every row.
+
+### The one case that isn't quiet
+
+A folder somebody can open is a folder somebody can delete out of, so the
+folder is *checked* rather than assumed. When a file that was copied is no
+longer there, the row turns yellow, says which of the two formats went, and
+offers the only two answers there are: **Resend**, or **Remove from Favorites**.
+
+It does not simply put the file back. Re-copying on sight would be an app
+arguing with a person about their own folder, and would make a deletion
+impossible to carry out — the second answer exists because deleting the file
+was very often the point. Yellow is already the colour of a reading that wants
+looking at here; the EV number past a stop and a half wears the same one.
+
+The same warning covers a copy that didn't finish, and a folder that has stopped
+resolving — signed out of, renamed away, a provider uninstalled — which is worth
+saying rather than reporting every frame as safely backed up somewhere
+unreachable.
+
+A file that is in the folder but not on *this* phone is a placeholder rather
+than an absence: iCloud lists it as `.name.jpg.icloud`, which is the backup
+working, not the backup failing, and the check reads the name back through
+before deciding anything.
+
+### Why none of it is in the way
+
+The rule this is built around is that it may cost nothing at launch and nothing
+at capture. So nothing runs on the way up, nothing is called from the shutter,
+and every pass happens on one serial queue at utility priority, with the
+folder's security scope held for exactly as long as the work takes.
+
+Three moments start a pass, and there is no fourth:
+
+| | |
+| --- | --- |
+| **A frame was kept** | Copies whatever the folder hasn't got, which is almost always the one file. Keeping is a decision made after the photograph rather than during it, so this is a moment with nothing else happening in it. |
+| **The favourites opened** | The one screen any of this is visible on, and so the one worth a look at the folder. |
+| **The app came forward** | Deferred four seconds, and dropped entirely if the folder was listed within the hour and nothing is outstanding. |
+
+The third is the only one that can land near a launch, and it is the one that
+does least: it waits for the camera to have its moment, and most of the time it
+wakes up, reads a date, and goes back to sleep. Checking is one directory
+listing — asking after each file on its own would be a round trip to the
+provider per frame per format — and what came back last time is remembered in
+`Documents/Backup.json`, which is a cache rather than a record. The folder is
+the truth. If that file doesn't decode, the next listing rebuilds it; the one
+thing it is there for is telling *never copied* apart from *copied, then taken
+out*, which are the two cases that want opposite answers.
+
+What the picker hands over is a URL that stops working when the app is
+relaunched, so what is kept is a bookmark to the folder rather than a path —
+the one thing that survives it being renamed or moved. Resolving one can go out
+to a file provider, so it happens on that same background queue and never for
+the sake of drawing a menu: the folder's name is remembered separately, which
+is all the menu needs to say where things are going.
 
 ## Background snapshots
 

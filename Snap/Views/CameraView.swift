@@ -12,6 +12,9 @@ import UIKit
 struct CameraView: View {
 
     @StateObject private var camera = CameraModel()
+    /// The kept frames' copy in whatever folder the user chose. Costs nothing
+    /// until something asks it for a pass — see `FavoritesBackup`.
+    @StateObject private var backup = FavoritesBackup()
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var isDeveloping = false
@@ -139,7 +142,19 @@ struct CameraView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
-        .onAppear { camera.start() }
+        .onAppear {
+            camera.start()
+            // The backup reads the roll rather than being handed it. Set here
+            // rather than at construction because the store is the camera's,
+            // and this is the first moment the view is standing up.
+            let store = camera.store
+            backup.source = { BackupSource(favorites: store.favorites, directory: store.directory) }
+            // Nothing happens for several seconds, and nothing at all if the
+            // folder was looked at within the hour. Launch belongs to the
+            // camera; this is what picks up a copy that a previous run was
+            // killed in the middle of.
+            backup.resumed()
+        }
         // The lock screen's own way in, and the one arrival that doesn't
         // resume anything — see `openFresh`.
         .onOpenURL { url in
@@ -153,6 +168,10 @@ struct CameraView: View {
                 // out is not a frame the app left behind.
                 camera.discardBackgroundSnapshot()
                 camera.start()
+                // Deferred by several seconds and thrown away if the folder
+                // was looked at within the hour, so the camera has the launch
+                // to itself.
+                backup.resumed()
             case .inactive:
                 // The frame that is about to freeze on screen, rendered while
                 // rendering is still allowed. A saved frame in the viewer is
@@ -187,6 +206,7 @@ struct CameraView: View {
         }
         .sheet(isPresented: $isShowingFavorites) {
             FavoritesList(store: store,
+                          backup: backup,
                           onSelect: openFromFavorites,
                           onToggleFavorite: toggleFavorite,
                           onCommitCaption: { shot, caption in setCaption(caption, for: shot) },
@@ -935,6 +955,11 @@ struct CameraView: View {
             store.toggleFavorite(shot)
         }
         UIImpactFeedbackGenerator(style: kept ? .medium : .light).impactOccurred()
+        // The one moment the backup is worth starting from the camera screen:
+        // a frame just became one of the frames it is about. Copying happens
+        // off this thread and never from the shutter — keeping a frame is a
+        // decision made after the photograph, not during it.
+        backup.rollChanged()
     }
 
     /// Deleting the frame being reviewed moves along the roll rather than

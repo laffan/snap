@@ -28,7 +28,10 @@ final class ShotStore: ObservableObject {
     /// The kept frames, in the same order the roll shows them.
     var favorites: [Shot] { shots.filter(\.isFavorite) }
 
-    private let directory: URL
+    /// Where the store keeps its files. Not private because the favourites'
+    /// backup builds its list of what to copy off the main thread, from file
+    /// names and this, rather than by asking the store one URL at a time.
+    let directory: URL
     private let fileManager = FileManager.default
 
     init() {
