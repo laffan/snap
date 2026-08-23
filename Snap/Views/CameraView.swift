@@ -6,6 +6,7 @@
 //  the develop editor that replaces them.
 //
 
+import Combine
 import SwiftUI
 import UIKit
 
@@ -15,7 +16,6 @@ struct CameraView: View {
     /// The kept frames' copy in whatever folder the user chose. Costs nothing
     /// until something asks it for a pass — see `FavoritesBackup`.
     @StateObject private var backup = FavoritesBackup()
-    @Environment(\.scenePhase) private var scenePhase
 
     @State private var isDeveloping = false
     @State private var isLoadingLook = false
@@ -65,6 +65,35 @@ struct CameraView: View {
     /// What the same row needs while a saved frame is up, which is the X's
     /// touch target and nothing else.
     private static let closeRowHeight: CGFloat = 44
+
+    // MARK: - The app's own comings and goings
+
+    /// The three moments the app leaves and arrives, as UIKit posts them.
+    ///
+    /// Not SwiftUI's `scenePhase`, which this used to read. Locking the screen
+    /// is the commonest way there is of putting a camera down, and it is the
+    /// one departure scene phase does not describe the way it describes the
+    /// others: the scene stays *inactive* behind the lock screen rather than
+    /// going to the background. So the frame was rendered on the way out, held,
+    /// and then thrown away by the cancel on the way back in — the write it was
+    /// waiting for never came. Every other way of leaving reports itself
+    /// properly, which is what made a bug that fired every single time look
+    /// like flakiness.
+    ///
+    /// `willResignActive` and `didEnterBackground` are the two moments UIKit
+    /// has always been explicit about, and it posts both for a lock exactly as
+    /// it does for the home screen. They mean what the two phases meant, so
+    /// nothing else about the arrangement changes.
+    ///
+    /// Held rather than built at each use: a publisher made inside `body` is a
+    /// new one every time the screen redraws, and a subscription torn down and
+    /// remade at that rate is work for nothing.
+    private static let willResignActive =
+        NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+    private static let didEnterBackground =
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+    private static let didBecomeActive =
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
 
     var body: some View {
         GeometryReader { geometry in
@@ -142,6 +171,10 @@ struct CameraView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
+        // The launch arrival. `didBecomeActive` below covers every other one,
+        // and covers this one too on most launches — but which of the two lands
+        // first isn't something to depend on for the camera coming up at all,
+        // and both are safe to do twice.
         .onAppear {
             camera.start()
             // The backup reads the roll rather than being handed it. Set here
@@ -161,30 +194,27 @@ struct CameraView: View {
             guard LaunchRoute.isCapture(url) else { return }
             openFresh()
         }
-        .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                // Back without ever having gone: whatever was held on the way
-                // out is not a frame the app left behind.
-                camera.discardBackgroundSnapshot()
-                camera.start()
-                // Deferred by several seconds and thrown away if the folder
-                // was looked at within the hour, so the camera has the launch
-                // to itself.
-                backup.resumed()
-            case .inactive:
-                // The frame that is about to freeze on screen, rendered while
-                // rendering is still allowed. A saved frame in the viewer is
-                // what freezes instead, and that one is already in the roll.
-                if viewing == nil { camera.prepareBackgroundSnapshot() }
-            case .background:
-                // Written here, where there is no GPU to reach for — and before
-                // the session stops, which is what clears the renderer.
-                camera.commitBackgroundSnapshot()
-                camera.stop()
-            default:
-                break
-            }
+        // The frame that is about to freeze on screen, rendered while rendering
+        // is still allowed. A saved frame in the viewer is what freezes
+        // instead, and that one is already in the roll.
+        .onReceive(CameraView.willResignActive) { _ in
+            if viewing == nil { camera.prepareBackgroundSnapshot() }
+        }
+        // Written here, where there is no GPU to reach for — and before the
+        // session stops, which is what clears the renderer.
+        .onReceive(CameraView.didEnterBackground) { _ in
+            camera.commitBackgroundSnapshot()
+            camera.stop()
+        }
+        .onReceive(CameraView.didBecomeActive) { _ in
+            // Back without ever having gone: whatever was held on the way out
+            // is not a frame the app left behind.
+            camera.discardBackgroundSnapshot()
+            camera.start()
+            // Deferred by several seconds and thrown away if the folder was
+            // looked at within the hour, so the camera has the launch to
+            // itself.
+            backup.resumed()
         }
         .sheet(item: $camera.pendingTitle) { shot in
             SaveShotSheet(store: store,

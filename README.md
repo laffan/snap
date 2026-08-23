@@ -554,6 +554,26 @@ takes focus — a notification, the control centre, a glance at the switcher —
 most of those come straight back. Returning to active throws the held frame
 away, so only actually leaving keeps one.
 
+### Which framework says so
+
+Those two moments are `UIApplication`'s `willResignActive` and
+`didEnterBackground`, and which API they are asked for from is the whole of why
+this used to work most of the time rather than all of it.
+
+It read SwiftUI's `scenePhase` first, whose `.inactive` and `.background` are
+meant to be exactly the same two moments. They are, for every way of leaving an
+app except the commonest way there is of putting a camera down: **lock the
+screen and the scene stays inactive rather than going to the background.** So
+the frame was rendered on the way out, held in memory, and then thrown away by
+the cancel on the way back in — the write it was waiting for never came. The
+home screen, the app switcher and opening something else all reported
+themselves properly, which is precisely what made a bug that fired every single
+time look like flakiness.
+
+UIKit posts both notifications for a lock as it does for anything else. Nothing
+else about the arrangement changed: the same two halves, at the same two
+moments, asked for from the framework that has always been explicit about them.
+
 A frame is kept only when the live preview is what is on screen. A saved frame
 in the viewer freezes as itself, and that one is already in the roll; a negative
 under the sliders freezes as a re-development of a frame that is also already in
