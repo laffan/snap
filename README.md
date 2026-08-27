@@ -58,6 +58,7 @@ resolution.
 | `Library/ShotInfo.swift` | When, where and on what a frame was taken, read back out of it |
 | `Camera/LocationTagger.swift` | The coordinate AVFoundation never writes |
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
+| `Views/HardwareShutter.swift` | The volume buttons, on the same shutter the finger has |
 | `LaunchRoute.swift` | The one URL the app answers to, and what it means |
 
 ## Which way up
@@ -971,6 +972,70 @@ One deliberate deviation from the source profile: it lists Green as Hue −35 bu
 annotates it *"shift toward aqua/blue"*, and in Lightroom a negative green hue
 moves toward yellow. The teal-shifted foliage is the defining half of this
 look, so the stated intent wins. See the comment in `PositiveFilmProfile.swift`.
+
+## The volume buttons
+
+Either volume button is the shutter. Pressing one takes exactly the photograph
+tapping the ring under the frame would have taken — the same haptic, the same
+flash, the same file. A phone held in two hands with a thumb on its edge is
+steadier than one being poked in the middle of its own screen, and it is the
+grip every other camera on the phone has already taught.
+
+Both of them, not just the top one. Which end of the rocker is uppermost
+depends on which way round the phone is being held, and a shutter that answers
+to only one of them is a shutter that stops working when the phone is turned
+over.
+
+`AVCaptureEventInteraction` is what asks for them, and it arrived in iOS 17.2.
+Before it the only way to hear a volume button was to watch `AVAudioSession`'s
+output volume for a change and quietly put it back — a trick that raced the
+volume HUD, did nothing at all when the volume was already at one end of its
+range, and was never meant to work. The interaction is the sanctioned version:
+added to a view, handed events that carry a phase, and delivered only while the
+app is in front with a capture session actually running. It swallows the volume
+change and the HUD along with the press, so nothing slides up over the frame.
+
+`HardwareShutter` is the view that carries it, and carrying it is all it is
+for. It draws nothing, refuses every touch, and lies behind the whole screen —
+an interaction has to live on a view that is in a window, and where in the
+window is not something it cares about.
+
+iOS 17.0 and 17.1 get nothing, and nothing breaks: the interaction is asked for
+behind an availability check, and the ring under the frame was always the
+shutter.
+
+### It fires on the press, not the release
+
+An event arrives as `began` and then as either `ended` or `cancelled`, and the
+shutter goes on `began`. A shutter release fires as it is pushed down; waiting
+for the finger to come off turns a press into a wait, and a camera that waits
+is a camera that misses. The cost is the cancel — a press the system takes back
+after it has begun has already taken a photograph here. That is the right way
+round for a camera. A frame nobody wanted is a swipe away; a frame that never
+happened is gone.
+
+### When there is no shutter, they are the volume again
+
+They are armed exactly when the shutter is on screen and means something. Not
+while a saved frame is being looked at, where the ring is replaced by an X and
+the two things left to do with a photograph are share it and delete it. Not
+while a caption is being typed. And not under the favourites, the wall, the
+snapshots, the look list, a share sheet or an alert — a screen over the camera
+is a screen you are reading, not one you are shooting from. Disarmed, the
+interaction leaves the press alone and the volume goes back to being the
+volume.
+
+There is no SwiftUI question for *is a sheet over me*, so that second half is
+the sum of the flags that raise one: a list `CameraView` has to add to when it
+grows a screen. That is the price of buttons that are never deaf and never
+greedy, and it is cheaper than the alternative, which is a shutter firing into
+the back of a sheet.
+
+**The develop screen keeps them.** The shutter there is **CAPTURE** at the foot
+of the sliders, and it is the same button under another name: with a negative
+loaded it makes a version of that negative, and without one it takes an
+ordinary frame. So the volume buttons run whatever that button would have run,
+rather than a second, plainer shutter that ignored the screen it was on.
 
 ## Lock screen
 

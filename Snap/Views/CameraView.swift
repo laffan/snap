@@ -171,6 +171,12 @@ struct CameraView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(.dark)
+        // Either volume button, on the same shutter the finger has. It lies
+        // behind the whole screen and refuses every touch, so where it is put
+        // decides nothing but that it is in a window.
+        .background {
+            HardwareShutter(isEnabled: isHardwareShutterArmed, action: hardwareShutter)
+        }
         // The launch arrival. `didBecomeActive` below covers every other one,
         // and covers this one too on most launches — but which of the two lands
         // first isn't something to depend on for the camera coming up at all,
@@ -879,6 +885,53 @@ struct CameraView: View {
             camera.capture(titled: titled, origin: .develop)
         } else {
             camera.captureVersion(titled: titled)
+        }
+    }
+
+    // MARK: - The volume buttons
+
+    /// Whether either volume button is the shutter at this moment.
+    ///
+    /// Armed exactly when the shutter is on screen and means something. Not
+    /// while a saved frame is being looked at, where the ring is replaced by an
+    /// X; not while a caption is being typed; and not under any of the screens
+    /// that come up over the camera. Disarmed, `AVCaptureEventInteraction`
+    /// leaves the press alone and the volume does what volume does.
+    ///
+    /// There is no SwiftUI question for "is a sheet over me", so the second
+    /// half is the sum of the flags that raise one — a list that has to grow
+    /// when a screen does, which is the price of the buttons never being deaf
+    /// and never being greedy.
+    private var isHardwareShutterArmed: Bool {
+        viewing == nil
+            && !isCaptioning
+            && !isShowingFavorites
+            && !isShowingSnapshots
+            && !isShowingGrid
+            && !isLoadingLook
+            && share == nil
+            && camera.pendingTitle == nil
+            && camera.errorMessage == nil
+    }
+
+    /// What a volume button does, which is whatever the shutter under the frame
+    /// would have done.
+    ///
+    /// The develop screen keeps them: the shutter there is **CAPTURE** at the
+    /// foot of the sliders, and it is the same button by another name — a
+    /// version of the negative under the sliders when there is one, an ordinary
+    /// frame when there isn't. Running `camera.capture()` here instead would be
+    /// a second, plainer shutter that ignored the screen it was on.
+    ///
+    /// The guard is the second of two: the interaction is disarmed by the state
+    /// above, and this catches a press that crossed with the change.
+    private func hardwareShutter() {
+        guard isHardwareShutterArmed else { return }
+
+        if isDeveloping {
+            primaryAction(titled: false)
+        } else {
+            camera.capture()
         }
     }
 
