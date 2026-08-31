@@ -61,6 +61,10 @@ struct LoupeView: View {
     @Binding var showsRAW: Bool
 
     @State private var image: UIImage? = nil
+    /// Which request the still on screen was made for. What tells a tap on JPG
+    /// or RAW — a different rendering, wanted now — apart from a slider moved
+    /// under the loupe, which is a hand still moving.
+    @State private var shown: Request? = nil
     @State private var isLoading = false
     /// Where the finger is, in the square's own points. Nil while nothing is
     /// touching it, which is when the frame is shown whole.
@@ -132,12 +136,14 @@ struct LoupeView: View {
         .frame(width: edge, height: edge)
         .clipped()
         .contentShape(Rectangle())
-        // One gesture, and it says both of the things the loupe can be told.
-        // Touching down magnifies at once — a loupe is put down on a print,
-        // not waited for — and the finger carries the magnified point with it
-        // from there. Lifting off after a decisive sideways drag is the other
-        // thing: the two renderings, swapped the way a swipe swaps anything
-        // else in this app.
+        // A finger on the frame means one thing here and only one: the cursor.
+        // Touching down magnifies at once — a loupe is put down on a print, not
+        // waited for — and the point under the finger is carried along from
+        // there. Lifting off puts the whole frame back, ready for the next
+        // place to look. Choosing between the two renderings used to be a
+        // sideways swipe on this same square, which made a second thing a
+        // finger could mean over a photograph being read; it is two buttons in
+        // the row below now.
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { value in
@@ -146,14 +152,7 @@ struct LoupeView: View {
                     }
                     cursor = value.location
                 }
-                .onEnded { value in
-                    cursor = nil
-                    guard source.rawURL != nil else { return }
-                    let width = value.translation.width
-                    guard abs(width) > 44, abs(width) > abs(value.translation.height) else { return }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showsRAW.toggle()
-                }
+                .onEnded { _ in cursor = nil }
         )
         // Light blue, and thick enough to read as a state rather than as an
         // edge the frame happens to have.
@@ -197,9 +196,12 @@ struct LoupeView: View {
     /// A slider moved under the loupe changes what the frame is, so the still
     /// is remade — but not on every tick of a drag, which would ask for a
     /// full-resolution development forty times a second. The pause is what says
-    /// the hand has settled; the first load doesn't wait for one.
+    /// the hand has settled. Nothing else waits: the first load, and a tap on
+    /// JPG or RAW, are both answers wanted now.
     private func load() async {
-        if image != nil {
+        let request = self.request
+
+        if let shown, shown.id == request.id, shown.showsRAW == request.showsRAW {
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
         }
@@ -250,35 +252,77 @@ struct LoupeView: View {
         // still of the settings before it is not the frame being looked at.
         guard !Task.isCancelled else { return }
         image = loaded
+        shown = request
         isLoading = false
     }
 }
 
-/// The way out, directly under the frame it is about.
+/// The loupe's own row, directly under the frame it is about.
 ///
-/// Said in words rather than as an X, because the loupe is a mode rather than
-/// a screen: there is nothing over the top of anything, and a photograph that
-/// has stopped fitting the square needs to say why and how to stop it.
-struct ExitLoupeButton: View {
+/// The way out at the left, and the two renderings at the right. All three are
+/// the same button in the same blue, because they are the same kind of thing:
+/// what this mode can be told. The one that is up is the filled one.
+///
+/// The way out is said in words rather than as an X, because the loupe is a
+/// mode rather than a screen — there is nothing over the top of anything, and a
+/// photograph that has stopped fitting the square has to say why and how to
+/// stop it.
+///
+/// JPG and RAW are buttons rather than a swipe. A swipe on the square meant a
+/// finger over a photograph being read had a second thing it could mean, and
+/// the cursor is the thing that square is for. Buttons also say which of the
+/// two is up, which is why the label in the row below goes away while this row
+/// is here: one question, answered once.
+struct LoupeBar: View {
 
-    var action: () -> Void
+    /// False for a frame with no negative — a preview frame — where there is
+    /// only ever the one rendering. Dimmed rather than absent, the way every
+    /// other button in this app is when it has nothing to do.
+    var hasRAW: Bool
+    @Binding var showsRAW: Bool
+    var onExit: () -> Void
 
     var body: some View {
+        HStack(spacing: 6) {
+            button("EXIT LOUPE MODE", isOn: false, action: onExit)
+                .accessibilityLabel("Exit loupe mode")
+
+            Spacer(minLength: 8)
+
+            button("JPG", isOn: !showsRAW, action: { showsRAW = false })
+                .accessibilityValue(showsRAW ? "off" : "on")
+
+            button("RAW", isOn: showsRAW, isEnabled: hasRAW, action: { showsRAW = true })
+                .accessibilityValue(showsRAW ? "on" : "off")
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .animation(.easeOut(duration: 0.12), value: showsRAW)
+    }
+
+    private func button(_ title: String,
+                        isOn: Bool,
+                        isEnabled: Bool = true,
+                        action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text("EXIT LOUPE MODE")
+            Text(title)
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(1.0)
                 .foregroundStyle(Color.snapLoupe)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
+                .background {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isOn ? Color.snapLoupe.opacity(0.18) : Color.clear)
+                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(Color.snapLoupe.opacity(0.6), lineWidth: 1)
+                        .strokeBorder(Color.snapLoupe.opacity(isOn ? 1 : 0.5), lineWidth: 1)
                 }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.top, 8)
-        .accessibilityLabel("Exit loupe mode")
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.35)
     }
 }

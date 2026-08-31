@@ -295,14 +295,21 @@ and it follows the finger from there. Lifting off puts the whole frame back,
 still in the loupe, ready for the next place to look.
 
 It reads as a mode rather than a screen: **a light blue border** around the
-frame, and **Exit Loupe Mode** directly under it. Light blue rather than the
+frame, and a row of its own directly under it. Light blue rather than the
 accent — the accent means a setting is switched on, and the loupe changes
 nothing about the photograph. It is a way of looking at one.
 
-**Swiping sideways in the loupe swaps the two renderings** rather than walking
-the roll: JPEG and RAW, the same pair the hold-to-peek offers everywhere else,
-said with the gesture that has nothing else to do in here. The row under the
-frame says which one landed, as it always does.
+That row is **Exit Loupe Mode** at the left, and **JPG** and **RAW** at the
+right — the same pair the hold-to-peek offers everywhere else, as two buttons
+rather than a gesture. All three are the same button in the same blue, because
+they are the same kind of thing: what this mode can be told. The one that is up
+is the filled one, and RAW dims for a frame with no negative behind it.
+
+They are buttons because a swipe on the square would mean a finger over a
+photograph being read had a second thing it could mean, and the cursor is what
+that square is for. Buttons also *say* which of the two is up, which is why the
+JPEG/RAW label in the row below goes away while this row is here: one question,
+answered once.
 
 It opens over either of the two screens where there is a photograph on display
 rather than a viewfinder: a saved frame in the viewer, and a negative under the

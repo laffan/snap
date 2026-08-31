@@ -119,10 +119,12 @@ struct CameraView: View {
                                                        isCaptioning: isCaptioning))
 
                     // Directly under the frame the blue border is around, so
-                    // the mode says what it is and how to leave it in the one
-                    // place the eye is already on.
-                    if isLoupe, loupeShot != nil {
-                        ExitLoupeButton(action: exitLoupe)
+                    // the mode says what it is, which rendering is up and how
+                    // to leave, all in the one place the eye is already on.
+                    if isLoupe, let source = loupeSource {
+                        LoupeBar(hasRAW: source.rawURL != nil,
+                                 showsRAW: $showsRAW,
+                                 onExit: exitLoupe)
                             .transition(.opacity)
                     }
 
@@ -485,12 +487,11 @@ struct CameraView: View {
     /// frame — and the screen already says Develop at the other end of the
     /// bar. Holding swaps either one to RAW.
     private var indicatorLabel: String {
-        // The loupe answers it for itself: a swipe in there swaps the two
-        // renderings rather than walking the roll, and this is the row that
-        // says which one landed.
-        if isLoupe, loupeShot != nil {
-            return showsRAW ? "RAW" : "JPEG"
-        }
+        // The loupe says it for itself, on its own row: JPG and RAW are two
+        // buttons there, and the lit one is the answer. Saying it twice in two
+        // words for the same thing would only invite the question of which of
+        // them to press.
+        if isLoupe, loupeShot != nil { return "" }
         if camera.versionSource != nil {
             return camera.isPeekingSource ? "RAW" : "JPEG"
         }

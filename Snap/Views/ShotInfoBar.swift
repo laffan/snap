@@ -86,14 +86,16 @@ struct ShotInfoBar: View {
                         .foregroundStyle(.white.opacity(0.75))
                         // A small glyph on an ordinary-sized target, the way
                         // the viewer's own Share and Delete are drawn.
-                        .frame(width: 34, height: 30)
+                        .frame(width: 34)
+                        // Filling the row's height rather than sitting at the
+                        // top of it, so the glyph lands halfway down the band
+                        // between the rule above the readout and the one under
+                        // it — the two lines either side of it are read, and
+                        // this is the one thing in the row that is aimed at.
+                        .frame(maxHeight: .infinity)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                // The two lines beside it are 11pt and sit tight to the top of
-                // the row; this lifts the glyph's larger box back level with
-                // the first of them.
-                .padding(.top, -6)
                 .accessibilityLabel("Delete this frame")
             }
 
