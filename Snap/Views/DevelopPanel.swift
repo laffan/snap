@@ -27,6 +27,9 @@ struct DevelopPanel: View {
     /// sliders are moving over the live camera, which is not a photograph and
     /// has no timestamp, place or settings to report.
     var info: ShotInfoSource?
+    /// Deletes the frame under the sliders. Nil over the live camera, which is
+    /// not a photograph yet and has nothing to throw away.
+    var onDelete: (() -> Void)?
     var onLoad: () -> Void
     var onSave: () -> Void
 
@@ -34,11 +37,28 @@ struct DevelopPanel: View {
         { look.setInteracting($0) }
     }
 
+    /// A binding to one of the three settings a sub-profile is allowed to hold,
+    /// which takes it back off whichever one is holding it as it moves.
+    ///
+    /// Indoor sets Temperature and Night sets Exposure and Shadows, and a
+    /// sub-profile sets rather than nudges — so without this, moving one of
+    /// those three sliders with the house or the moon lit changed a number the
+    /// renderer then overwrote, and the photograph did not move. Every slider
+    /// in this panel changes the photograph; that is what a develop panel is.
+    private func byHand(_ setting: SubProfile.Setting) -> Binding<Float> {
+        // The model rather than the view: a binding outlives the redraw that
+        // made it, and what it needs to hold on to is the one object, not a
+        // copy of the panel around it.
+        let look = self.look
+        return Binding(get: { look.profile[keyPath: setting.keyPath] },
+                       set: { look.setByHand(setting, to: $0) })
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let info {
-                    ShotInfoBar(source: info)
+                    ShotInfoBar(source: info, onDelete: onDelete)
                     Divider().overlay(Color.white.opacity(0.12))
                 }
 
@@ -65,15 +85,15 @@ struct DevelopPanel: View {
         DevelopSection(title: "Basic") {
             // First, the way a white balance comes first: it decides what
             // colour the light was, and everything under it is built on that.
-            SliderRow(label: "Temperature", value: $look.profile.temperature,
+            SliderRow(label: "Temperature", value: byHand(.temperature),
                       onEditingChanged: editing)
-            SliderRow(label: "Exposure", value: $look.profile.exposure,
+            SliderRow(label: "Exposure", value: byHand(.exposure),
                       range: -5...5, decimals: 2, onEditingChanged: editing)
             SliderRow(label: "Contrast", value: $look.profile.contrast,
                       onEditingChanged: editing)
             SliderRow(label: "Highlights", value: $look.profile.highlights,
                       onEditingChanged: editing)
-            SliderRow(label: "Shadows", value: $look.profile.shadows,
+            SliderRow(label: "Shadows", value: byHand(.shadows),
                       onEditingChanged: editing)
             SliderRow(label: "Blacks", value: $look.profile.blacks,
                       onEditingChanged: editing)

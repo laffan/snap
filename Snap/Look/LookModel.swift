@@ -95,6 +95,23 @@ final class LookModel: ObservableObject {
         self.profile = profile
     }
 
+    /// Moves one of the settings a sub-profile is allowed to hold, and takes it
+    /// back off whichever one is holding it.
+    ///
+    /// The develop panel's Temperature, Exposure and Shadows sliders write
+    /// through here, and so do the exposure stepper and the meter readout on
+    /// the camera screen — the two other ways Exposure is reached. One mutation
+    /// rather than two, so a drag costs one bake per tick rather than two.
+    ///
+    /// The claim is recorded even when the number lands where it already was:
+    /// double-tapping Exposure back to zero under a lit Night is a hand on the
+    /// slider saying zero, and it has to mean zero.
+    func setByHand(_ setting: SubProfile.Setting, to value: Float) {
+        var updated = profile
+        updated.setByHand(setting, to: value)
+        profile = updated
+    }
+
     // MARK: - Baking
 
     private func requestBake() {

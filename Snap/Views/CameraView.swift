@@ -39,8 +39,13 @@ struct CameraView: View {
     /// different questions.
     @State private var isShowingShutterRow = false
     @State private var isShowingISORow = false
-    /// True while the viewer is being held down to show the negative.
+    /// True while the viewer is being held down to show the negative — and,
+    /// in the loupe, which of the two renderings is up.
     @State private var showsRAW = false
+    /// The frame at 100%, under a finger. Reached by swiping down over a frame
+    /// being reviewed, whether that is a saved one in the viewer or a negative
+    /// under the sliders.
+    @State private var isLoupe = false
     /// Where focus is pinned, in the preview's own coordinates.
     @State private var focusPoint: CGPoint? = nil
     @State private var pressLocation: CGPoint = .zero
@@ -112,6 +117,15 @@ struct CameraView: View {
                                                        height: geometry.size.height,
                                                        lift: lift,
                                                        isCaptioning: isCaptioning))
+
+                    // Directly under the frame the blue border is around, so
+                    // the mode says what it is and how to leave it in the one
+                    // place the eye is already on.
+                    if isLoupe, loupeShot != nil {
+                        ExitLoupeButton(action: exitLoupe)
+                            .transition(.opacity)
+                    }
+
                     sourceIndicator
                     exposureRows
                 }
@@ -160,6 +174,7 @@ struct CameraView: View {
                                  isMonochromeLocked: camera.isMonochromeLocked,
                                  isBusy: camera.isCapturing,
                                  info: developInfo,
+                                 onDelete: deleteDeveloping,
                                  onLoad: { isLoadingLook = true },
                                  onSave: { primaryAction(titled: true) })
                         .transition(.opacity)
@@ -324,6 +339,17 @@ struct CameraView: View {
                     )
             }
 
+            // The loupe covers the frame rather than replacing it. It is
+            // opaque and takes every touch, so nothing underneath it is
+            // reachable — and leaving it puts back a view that was never taken
+            // down, which for a negative under the sliders matters: the Metal
+            // view it is drawn into is fed by frames, and a still has no next
+            // frame to arrive and fill a fresh one.
+            if isLoupe, let source = loupeSource {
+                LoupeView(source: source, look: camera.look, edge: edge, showsRAW: $showsRAW)
+                    .transition(.opacity)
+            }
+
             // A short black blink, the way a mechanical shutter reads.
             Color.black
                 .opacity(camera.isShutterFlashing ? 1 : 0)
@@ -361,19 +387,77 @@ struct CameraView: View {
         }
     }
 
-    /// A horizontal drag on a frame moves to the one beside it.
+    /// A drag on a frame: sideways moves along the roll, down opens the loupe.
     ///
     /// The roll runs newest to oldest, left to right, so a swipe that carries
     /// the frame leftward moves the way the strip does: to the older one. The
-    /// distance is long enough, and vertical drift disqualifying enough, that a
-    /// hold that wandered still peeks rather than turning the page.
+    /// distance is long enough, and the direction has to be decided enough,
+    /// that a hold that wandered still peeks rather than turning the page.
+    ///
+    /// Down is the direction the roll doesn't use, and the loupe is the thing
+    /// that goes under a photograph, so down is what puts one there. Up is left
+    /// alone: nothing above the frame is a place to be sent.
     private func swipe(_ step: @escaping (Int) -> Void) -> some Gesture {
         DragGesture(minimumDistance: 24, coordinateSpace: .local)
             .onEnded { value in
                 let width = value.translation.width
-                guard abs(width) > 44, abs(width) > abs(value.translation.height) else { return }
+                let height = value.translation.height
+
+                guard abs(width) > abs(height) else {
+                    guard height > 44 else { return }
+                    enterLoupe()
+                    return
+                }
+                guard abs(width) > 44 else { return }
                 step(width < 0 ? 1 : -1)
             }
+    }
+
+    // MARK: - The loupe
+
+    /// The frame the loupe would magnify: whichever one is being reviewed.
+    ///
+    /// A saved frame in the viewer, or a negative under the sliders — the two
+    /// screens where there is a photograph on display rather than a viewfinder,
+    /// which are exactly the two the loupe is for.
+    private var loupeShot: Shot? { viewing ?? camera.versionSource }
+
+    /// What the loupe has to load, built off whichever of the two frames is up.
+    ///
+    /// It carries the frame's own look, which is what develops its negative in
+    /// the viewer. Under the sliders the loupe reads the live one instead — the
+    /// JPEG on disk is the frame as it was taken, and what is on screen there
+    /// is the frame as it is being developed — which is why it watches
+    /// `LookModel` itself rather than being handed a copy from here.
+    private var loupeSource: LoupeSource? {
+        guard let shot = loupeShot else { return nil }
+        return LoupeSource(id: shot.id,
+                           jpegURL: store.imageURL(for: shot),
+                           rawURL: store.rawURL(for: shot),
+                           // The shot's own copy rather than the one in its
+                           // EXIF: this is built on every redraw, and reading a
+                           // file that often to learn something already in hand
+                           // is not worth the trip. Under the sliders the loupe
+                           // watches the live look instead, which this screen
+                           // deliberately does not.
+                           profile: shot.profile,
+                           isDeveloping: viewing == nil && camera.versionSource != nil)
+    }
+
+    private func enterLoupe() {
+        guard !isLoupe, loupeShot != nil else { return }
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showsRAW = false
+        // The peek and the loupe are two ways of asking the same question, and
+        // a peek left switched on under a loupe would answer it twice.
+        camera.setPeekingSource(false)
+        withAnimation(.easeOut(duration: 0.18)) { isLoupe = true }
+    }
+
+    private func exitLoupe() {
+        guard isLoupe else { return }
+        showsRAW = false
+        withAnimation(.easeOut(duration: 0.18)) { isLoupe = false }
     }
 
     @ViewBuilder
@@ -401,6 +485,12 @@ struct CameraView: View {
     /// frame — and the screen already says Develop at the other end of the
     /// bar. Holding swaps either one to RAW.
     private var indicatorLabel: String {
+        // The loupe answers it for itself: a swipe in there swaps the two
+        // renderings rather than walking the roll, and this is the row that
+        // says which one landed.
+        if isLoupe, loupeShot != nil {
+            return showsRAW ? "RAW" : "JPEG"
+        }
         if camera.versionSource != nil {
             return camera.isPeekingSource ? "RAW" : "JPEG"
         }
@@ -729,6 +819,7 @@ struct CameraView: View {
     private func actionBar(liftLimit: CGFloat) -> some View {
         ActionBar(store: store,
                   snapshots: camera.snapshots,
+                  look: camera.look,
                   isDeveloping: isDeveloping,
                   canDevelop: canDevelop,
                   isStripVisible: isShowingStrip,
@@ -751,6 +842,18 @@ struct CameraView: View {
     /// exposure is on the rows above.
     private var developInfo: ShotInfoSource? {
         camera.versionSource.map(infoSource)
+    }
+
+    /// Throws the frame under the sliders away.
+    ///
+    /// The develop screen had no way to do it: the row that carries Share and
+    /// Delete on the review screen is the shutter row, and the shutter row is
+    /// one of the things that leaves upward when the panel opens. Nil over the
+    /// live camera, which is not a photograph yet — and where the readout that
+    /// carries this isn't drawn either.
+    private var deleteDeveloping: (() -> Void)? {
+        guard let shot = camera.versionSource else { return nil }
+        return { delete(shot) }
     }
 
     /// The frame's own file is what the readout reads, in the viewer and under
@@ -857,6 +960,10 @@ struct CameraView: View {
     }
 
     private func setEditing(_ editing: Bool) {
+        // The loupe belongs to the frame it was opened over, and crossing
+        // between the two screens is putting that frame down.
+        exitLoupe()
+
         withAnimation(.easeInOut(duration: 0.22)) {
             isDeveloping = editing
             // The lift belongs to one visit to the panel: the square is whole
@@ -904,6 +1011,7 @@ struct CameraView: View {
     /// and never being greedy.
     private var isHardwareShutterArmed: Bool {
         viewing == nil
+            && !isLoupe
             && !isCaptioning
             && !isShowingFavorites
             && !isShowingSnapshots
@@ -938,6 +1046,8 @@ struct CameraView: View {
     /// Tapping a frame while the develop panel is open loads its negative under
     /// the sliders; tapping the same one again lets the camera back through.
     private func selectForVersion(_ shot: Shot) {
+        exitLoupe()
+
         // The viewer shows one thing at a time: a negative under the sliders
         // takes it back from a saved frame that was carried in from the camera
         // screen.
@@ -955,6 +1065,7 @@ struct CameraView: View {
     }
 
     private func openFromRoll(_ shot: Shot) {
+        exitLoupe()
         viewing = shot
     }
 
@@ -976,6 +1087,8 @@ struct CameraView: View {
     /// same thing. One with no negative can't be developed, so it goes to the
     /// viewer instead, which means putting the panel down.
     private func open(_ shot: Shot) {
+        exitLoupe()
+
         if isDeveloping {
             if store.rawURL(for: shot) != nil {
                 viewing = nil
@@ -1054,6 +1167,9 @@ struct CameraView: View {
     /// stays up and the next frame arrives in it, the way a swipe would have
     /// brought it.
     private func delete(_ shot: Shot) {
+        // Whatever the loupe was on is going, and the frame that arrives in its
+        // place is one to look at rather than one already under a lens.
+        if loupeShot?.id == shot.id { exitLoupe() }
         if viewing?.id == shot.id { viewing = neighbour(of: shot) }
         if camera.versionSource?.id == shot.id { camera.endVersioning() }
         camera.delete(shot)
@@ -1064,6 +1180,9 @@ struct CameraView: View {
     /// of frames ticked off a wall is a different errand from walking the roll,
     /// and it ends back at the camera.
     private func deleteAll(_ shots: [Shot]) {
+        if let shot = loupeShot, shots.contains(where: { $0.id == shot.id }) {
+            exitLoupe()
+        }
         if let viewing, shots.contains(where: { $0.id == viewing.id }) {
             self.viewing = nil
         }
@@ -1104,6 +1223,7 @@ struct CameraView: View {
             isDeveloping = false
             panelLift = 0
             viewing = nil
+            isLoupe = false
             isShowingShutterRow = false
             isShowingISORow = false
         }
@@ -1253,7 +1373,9 @@ private struct ExposureMeterReadout: View {
 
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            look.profile.exposure = min(max(-offset, -5), 5)
+            // By hand, like the slider and the stepper: a correction the
+            // photographer asked for is not one Night gets to put back.
+            look.setByHand(.exposure, to: min(max(-offset, -5), 5))
         } label: {
             Text(magnitude < 0.05 ? "0.0 EV" : String(format: "%+.1f EV", offset))
                 .font(.system(size: 10, weight: .medium))
@@ -1391,12 +1513,18 @@ private struct SubProfileToggles: View {
 
 /// Owns the binding to the look's exposure, so the stepper stays in step with
 /// the panel's slider and only this redraws when either moves.
+///
+/// It writes by hand, the way the panel's Exposure slider does: a stepper that
+/// counted stops while Night quietly held the exposure at −0.6 would be a
+/// control that reported a setting rather than made one.
 private struct ExposureControl: View {
 
     @ObservedObject var look: LookModel
 
     var body: some View {
-        ExposureStepper(value: $look.profile.exposure, range: -5...5)
+        ExposureStepper(value: Binding(get: { look.profile.exposure },
+                                       set: { look.setByHand(.exposure, to: $0) }),
+                        range: -5...5)
     }
 }
 

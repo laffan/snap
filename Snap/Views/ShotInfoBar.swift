@@ -26,6 +26,14 @@ struct ShotInfoSource: Equatable {
 struct ShotInfoBar: View {
 
     let source: ShotInfoSource
+    /// Throws the frame away, where there is anywhere else to say so.
+    ///
+    /// The review screen has Share and Delete flanking the X under the frame;
+    /// the develop screen has no such row — the shutter's place is taken by
+    /// CAPTURE VERSION, and the two round buttons beside it are gone. So the
+    /// one thing missing there comes here, beside the reading it belongs to.
+    /// Nil in the viewer, where it would be the second Delete on one screen.
+    var onDelete: (() -> Void)? = nil
 
     @State private var info = ShotInfo()
     /// The name of somewhere, once the geocoder answers. The coordinate stands
@@ -36,8 +44,9 @@ struct ShotInfoBar: View {
 
     // Explicit because the private state above would otherwise make the
     // memberwise initializer private, putting this out of reach of the panel.
-    init(source: ShotInfoSource) {
+    init(source: ShotInfoSource, onDelete: (() -> Void)? = nil) {
         self.source = source
+        self.onDelete = onDelete
     }
 
     private var placeLabel: String? {
@@ -67,6 +76,26 @@ struct ShotInfoBar: View {
             }
 
             Spacer(minLength: 0)
+
+            // Immediately to the left of the column it is about, so what it
+            // would throw away is the thing being read.
+            if let onDelete {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .light))
+                        .foregroundStyle(.white.opacity(0.75))
+                        // A small glyph on an ordinary-sized target, the way
+                        // the viewer's own Share and Delete are drawn.
+                        .frame(width: 34, height: 30)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                // The two lines beside it are 11pt and sit tight to the top of
+                // the row; this lifts the glyph's larger box back level with
+                // the first of them.
+                .padding(.top, -6)
+                .accessibilityLabel("Delete this frame")
+            }
 
             VStack(alignment: .trailing, spacing: 2) {
                 // The sub-profiles sit beside the shutter because they belong

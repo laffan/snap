@@ -95,10 +95,6 @@ final class CameraModel: NSObject, ObservableObject {
     /// taken. The colour is still in the DNG for anyone who exports it.
     var isMonochromeLocked: Bool { versionSource?.profile.blackAndWhite == true }
 
-    /// Set when loading a negative turned monochrome on, so ending the session
-    /// can put it back rather than leaving the camera in a mode nobody chose.
-    private var forcedMonochrome = false
-
     /// The source developed once at preview size. Re-grading it is cheap;
     /// re-developing it is not, so it is only redone when a setting that feeds
     /// the RAW pipeline itself changes.
@@ -853,27 +849,38 @@ final class CameraModel: NSObject, ObservableObject {
 
     // MARK: - Re-filtering a stored negative
 
-    /// Puts a stored negative under the sliders in place of the live camera.
+    /// Puts a stored negative under the sliders in place of the live camera,
+    /// wearing the settings it was taken with.
+    ///
+    /// A frame arrives as itself. Loading one under whatever happened to be on
+    /// the sliders showed a photograph nobody had ever taken — the last frame's
+    /// grade over this frame's negative — and made the roll under the panel a
+    /// row of thumbnails that lied about what tapping them would produce. So
+    /// the shot's own look comes with it, off the file the way everything else
+    /// about it is read, and the sliders say what the frame is.
+    ///
+    /// Its settings then stay on the sliders when the panel closes. Whatever
+    /// was last developed is where the develop screen was left, and the camera
+    /// picks up from there rather than from something it put back quietly.
     func beginVersioning(from shot: Shot) {
         guard let rawURL = store.rawURL(for: shot) else { return }
         versionSource = shot
 
-        if shot.profile.blackAndWhite, !look.profile.blackAndWhite {
-            forcedMonochrome = true
-            look.profile.blackAndWhite = true
-        }
+        var profile = store.profile(for: shot)
+        // A monochrome frame stays monochrome whatever its stored look says:
+        // the colour it was rendered without isn't in the JPEG, and the panel's
+        // toggle is locked for the same reason.
+        if shot.profile.blackAndWhite { profile.blackAndWhite = true }
+        look.apply(profile)
 
         setVersioning(true)
         developSource(at: rawURL)
     }
 
+    /// Puts the negative down and hands the live camera back. What it does
+    /// *not* do is put the look back: the sliders keep the last frame that was
+    /// developed, which is what the develop screen was left showing.
     func endVersioning() {
-        // Only undo what loading the negative turned on; a mode the user
-        // chose while it was open is theirs to keep.
-        if forcedMonochrome {
-            look.profile.blackAndWhite = false
-            forcedMonochrome = false
-        }
         versionSource = nil
         developedSource = nil
         developedBoost = nil

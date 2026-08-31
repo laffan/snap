@@ -50,6 +50,7 @@ resolution.
 | `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the favourites |
 | `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
 | `Views/DevelopPanel.swift` | The slider editor |
+| `Views/LoupeView.swift` | The frame at 100%, under a finger |
 | `Views/FavoritesList.swift` | The kept frames, and the heart that opens them |
 | `Library/BackupFolder.swift` | The folder the user picked, and how the app gets back into it |
 | `Library/FavoritesBackup.swift` | Keeping every kept frame's files in that folder |
@@ -275,10 +276,48 @@ photograph, and the photograph has to still be there.
 **Swipe the frame** left or right to move along the roll. Left carries it the
 way the strip runs — newest at the left, older to the right — so a swipe goes
 to the older frame and back again, and stops at each end rather than wrapping
-round to the other one. The swipe is deliberately long, and gives up the moment
-it drifts vertically, so a hold that wandered still peeks at the negative
-instead of turning the page. It works the same way over a negative loaded under
-the sliders, where it walks only the frames that have a negative to develop.
+round to the other one. The swipe is deliberately long, and has to be decidedly
+sideways, so a hold that wandered still peeks at the negative instead of turning
+the page. It works the same way over a negative loaded under the sliders, where
+it walks only the frames that have a negative to develop.
+
+### The loupe
+
+**Swipe the frame down** and it stops fitting the screen.
+
+A square four hundred points across is a poor place to answer the one question
+that decides whether a photograph is worth keeping, which is whether it is
+sharp. Twelve megapixels drawn into four hundred points is a frame that always
+looks sharp. So the loupe shows it at 100% instead — one pixel of the
+photograph on one pixel of the screen — and **the finger is the cursor**:
+press anywhere and that point comes to the middle of the square magnified,
+and it follows the finger from there. Lifting off puts the whole frame back,
+still in the loupe, ready for the next place to look.
+
+It reads as a mode rather than a screen: **a light blue border** around the
+frame, and **Exit Loupe Mode** directly under it. Light blue rather than the
+accent — the accent means a setting is switched on, and the loupe changes
+nothing about the photograph. It is a way of looking at one.
+
+**Swiping sideways in the loupe swaps the two renderings** rather than walking
+the roll: JPEG and RAW, the same pair the hold-to-peek offers everywhere else,
+said with the gesture that has nothing else to do in here. The row under the
+frame says which one landed, as it always does.
+
+It opens over either of the two screens where there is a photograph on display
+rather than a viewfinder: a saved frame in the viewer, and a negative under the
+sliders. Under the sliders the graded side is *made* rather than read — the
+JPEG on disk is the frame as it was taken, and what is on screen there is the
+frame as it is being developed, so the loupe develops and grades the negative
+itself at loupe size. Move a slider under it and the still is remade, after a
+pause long enough that a drag doesn't ask for a full-resolution development
+forty times a second.
+
+Nothing else on the screen is reachable while it is up: the loupe is opaque and
+takes every touch, so the peek, the double tap that keeps a frame and the swipe
+along the roll are all out of the way rather than underneath waiting to fire.
+The volume buttons go back to being the volume, like anywhere else the shutter
+isn't what is on screen.
 
 **The strip follows.** Whatever is in the viewer is centred in the roll below
 it — after a swipe, after a frame is opened out of the favourites or the grid,
@@ -332,6 +371,15 @@ are on, the second is the one worth keeping.
 the bar's centre, around buttons that were already there and don't move. Nothing
 else arrives: what the panel can do lives in the panel, at the foot of the
 sliders it belongs to, and the capture is a button of its own under the frame.
+
+**It goes red, and grows a red border, the moment the look stops being the one
+the app ships with** — and stays grey while it is, since there is then nothing
+to undo. Everything counts: a slider, a sub-profile, black and white, a setting
+taken back off the house or the moon by hand. Red because this is the one button
+in the app that throws work away, and the ring is what makes it read as a button
+worth being careful with rather than as a word that has gone a different colour.
+It is also the shortest answer to *am I looking at the built-in look or at
+something I made*, without opening the panel and reading forty rows.
 
 This was two bars: Develop and the heart centred under the shutter on the
 camera screen, and the same two left-aligned in the panel's header once it
@@ -602,6 +650,31 @@ means the same thing wherever the base happens to be sitting, and switching it
 off puts the frame back exactly. Both at once apply in the order they sit in the
 row.
 
+### What it does not get to do is win an argument with the slider
+
+Setting rather than nudging had one consequence nobody wanted: with Night lit,
+three of the develop panel's controls did nothing. Exposure moved, and Night put
+it back to −0.6 on the way to the renderer; Shadows moved, and Night put it back
+to −40; Temperature under Indoor, the same. The number on the row changed and
+the photograph did not, which is the one thing a develop panel may never do.
+
+So the hand wins. **Taking hold of one of those sliders takes that setting back
+off the sub-profile**, and the sub-profile leaves it alone from then on — the
+rest of what it sets carries on as before. Every slider in the panel changes the
+photograph, whatever is lit above the shutter. It is the same for the two other
+ways Exposure is reached, the stepper beside the frame and the tap on the EV
+readout, since they are the same setting and a control that reported a value
+rather than making one would be no better there.
+
+**Switching a sub-profile off and on again hands it back.** A toggle has to mean
+the same thing every time it is pressed, and a correction that remembered which
+of its settings had been argued with last time would not — so a fresh light is a
+fresh correction rather than one with holes in it.
+
+Which settings have been taken back travels with the frame, in its EXIF beside
+the base profile and the flags, for the same reason the flags do: so a shot can
+be reopened and re-developed as the photograph it actually was.
+
 Nothing here edits the base profile. The develop panel's sliders go on showing
 the base values while one is lit, because the base is still what is being worked
 on — the sub-profile is laid over it at the moment of rendering, by
@@ -770,9 +843,9 @@ means nothing on another lens.
 A monochrome frame stays monochrome. Loading one for re-developing switches
 B&W on and locks it: the colour it was rendered without isn't in the JPEG, and
 re-developing it back to colour would quietly produce a different photograph
-from the one that was taken. Exporting the DNG still gets you the colour.
-Ending the session only puts B&W back the way it was if loading the negative
-is what turned it on.
+from the one that was taken. Exporting the DNG still gets you the colour. It
+stays on afterwards, like everything else the last negative put on the sliders
+— see [Re-developing a negative](#re-developing-a-negative).
 
 Preview frames have no negative, so they can't be re-developed — they show
 dimmed in the roll while the panel is open, don't respond to a tap, and put
@@ -816,6 +889,25 @@ opens, since a frame chosen on the way in may sit well down the roll, and again
 each time a swipe steps to the next negative. Tapping that same thumbnail again
 puts the negative down: the live preview comes back under the sliders, still
 open.
+
+**The frame arrives wearing the settings it was taken with.** Its own look goes
+onto the sliders as it loads — however it was reached: tapped in the strip,
+swiped to, opened out of the favourites or the wall, or carried in from the
+viewer when Develop was pressed. It used to load under whatever happened to be
+on the sliders, which showed a photograph nobody had ever taken — the last
+frame's grade over this frame's negative — and made the roll under the panel a
+line of thumbnails that lied about what tapping one would produce. Now the
+sliders say what the frame is, and the panel opens on the photograph rather than
+on a version of it.
+
+**And they stay when the panel closes.** Whatever was last developed is where
+the develop screen was left, and the camera picks up from there — one look, one
+set of sliders, wherever you are standing on it. Nothing is quietly put back on
+the way out. The one thing that ever was, black and white after a monochrome
+negative, is not any more: a look that restored one setting out of forty would
+be harder to predict than one that restores none. **Reset** on the bar is the
+way back to the built-in look, and it is red whenever there is anything to go
+back from.
 
 **Snap** becomes **Capture Version** while a negative is loaded, and runs the same
 pipeline the shutter does — develop, crop, grade, encode, square the DNG,
@@ -881,6 +973,16 @@ a sensitivity, so each side reads as a pair — the first line of each carries t
 reading and the second qualifies it. The same four lines sit under a frame open
 in the viewer, in the same place relative to it, since the question there is the
 same one.
+
+**A trash glyph sits just left of the shutter and ISO**, and throws that frame
+away — the store's JPEG, its negative, its sidecar, and the camera roll's copy,
+exactly as **Delete Image** does anywhere else. The develop screen had no way to
+do it: Share and Delete flank the **X** on the review screen, and that whole row
+is one of the things that leaves upward when the panel opens, so a frame you had
+just decided against had to be put down and picked up again somewhere else. It
+goes here rather than on the bar because it is about *this* frame, and this is
+the row that is about this frame. It is absent over the live camera, along with
+the rest of the readout: nothing has been taken yet.
 
 **Tapping the place opens it in Google Maps** — an ordinary
 `https://www.google.com/maps` link, which the app claims, so the tap lands in it
@@ -1019,7 +1121,8 @@ happened is gone.
 They are armed exactly when the shutter is on screen and means something. Not
 while a saved frame is being looked at, where the ring is replaced by an X and
 the two things left to do with a photograph are share it and delete it. Not
-while a caption is being typed. And not under the favourites, the wall, the
+under the loupe, which is a photograph being read rather than one being taken.
+Not while a caption is being typed. And not under the favourites, the wall, the
 snapshots, the look list, a share sheet or an alert — a screen over the camera
 is a screen you are reading, not one you are shooting from. Disarmed, the
 interaction leaves the press alone and the volume goes back to being the

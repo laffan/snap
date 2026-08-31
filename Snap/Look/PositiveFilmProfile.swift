@@ -134,27 +134,45 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// is edited by them and the sliders go on showing the base.
     var subProfiles: Set<SubProfile> = []
 
+    /// The settings the photographer has moved by hand, which no sub-profile
+    /// gets to set over the top of.
+    ///
+    /// A sub-profile *sets* the settings it names, which is what makes a toggle
+    /// mean the same thing wherever the base is sitting — and what used to make
+    /// three of the develop panel's sliders do nothing at all while one was
+    /// lit. Exposure moved, and Night put it back to −0.6 on the way to the
+    /// renderer, every time. So the hand wins: taking hold of a slider records
+    /// it here and the sub-profile leaves it alone from then on, which is what
+    /// makes every slider in the panel change the photograph.
+    ///
+    /// Switching a sub-profile off and on again clears the ones it names — see
+    /// `toggle` — so a fresh light is a fresh correction rather than a
+    /// correction with holes in it.
+    var overrides: Set<SubProfile.Setting> = []
+
     /// The lit sub-profiles in a fixed order, for anything that shows them.
     var activeSubProfiles: [SubProfile] {
         SubProfile.allCases.filter { subProfiles.contains($0) }
     }
 
     /// The profile as it is actually rendered: the base with whatever
-    /// sub-profiles are lit laid over it.
+    /// sub-profiles are lit laid over it, less whatever has been taken back by
+    /// hand.
     ///
     /// Everything that bakes, grades or describes a rendering goes through
     /// this; everything that is *stored* keeps the base and the flags apart, so
     /// a shot can be reopened with the sub-profile still switchable.
     var resolved: PositiveFilmProfile {
-        guard !subProfiles.isEmpty else { return self }
-
         var result = self
         for subProfile in activeSubProfiles {
-            result = subProfile.applied(to: result)
+            result = subProfile.applied(to: result, skipping: overrides)
         }
         // Already applied: a resolved profile resolves to itself, which is what
-        // keeps a second pass from laying them on twice.
+        // keeps a second pass from laying them on twice. Both are cleared
+        // whether or not anything was lit, so two profiles that render the same
+        // photograph compare equal — which is what the bake cache is asking.
         result.subProfiles = []
+        result.overrides = []
         return result
     }
 
@@ -164,6 +182,18 @@ struct PositiveFilmProfile: Codable, Equatable {
         } else {
             subProfiles.insert(subProfile)
         }
+        // Either way this sub-profile starts again from nothing: a toggle means
+        // the same thing every time it is pressed, and a correction that
+        // remembered which of its settings had been argued with last time
+        // would not.
+        overrides.subtract(subProfile.settings.keys)
+    }
+
+    /// Moves one setting by hand, and takes it off any sub-profile that names
+    /// it. Every slider and stepper that writes one of these goes through here.
+    mutating func setByHand(_ setting: SubProfile.Setting, to value: Float) {
+        self[keyPath: setting.keyPath] = value
+        overrides.insert(setting)
     }
 
     // MARK: - Slider → renderer conversions
@@ -244,7 +274,7 @@ extension PositiveFilmProfile {
         case bands
         case redPrimary, greenPrimary, bluePrimary
         case rawBoost
-        case subProfiles
+        case subProfiles, overrides
     }
 
     init(from decoder: Decoder) throws {
@@ -281,6 +311,13 @@ extension PositiveFilmProfile {
         // back to empty rather than the shot failing to load.
         if let decoded = ((try? container.decodeIfPresent(Set<SubProfile>.self, forKey: .subProfiles)) ?? nil) {
             subProfiles = decoded
+        }
+
+        // Same treatment, and for the same reason: a setting name this build
+        // doesn't know throws, and the set falls back to empty rather than the
+        // shot failing to load.
+        if let decoded = ((try? container.decodeIfPresent(Set<SubProfile.Setting>.self, forKey: .overrides)) ?? nil) {
+            overrides = decoded
         }
 
         if let decoded = ((try? container.decodeIfPresent([HSLBand].self, forKey: .bands)) ?? nil),

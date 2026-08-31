@@ -25,6 +25,10 @@ struct ActionBar: View {
     /// For the starburst, which lights only when the app has left something
     /// behind.
     @ObservedObject var snapshots: SnapshotStore
+    /// Handed to Reset rather than watched here: the look changes on every
+    /// frame of a slider drag, and only the one button that has anything to say
+    /// about it redraws at that rate.
+    let look: LookModel
 
     var isDeveloping: Bool
     /// False when the frame in the viewer has no negative to develop.
@@ -62,9 +66,7 @@ struct ActionBar: View {
                 snapshotsButton
 
                 if isDeveloping {
-                    Button("Reset", action: onReset)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.55))
+                    ResetButton(look: look, action: onReset)
                         .padding(.leading, 8)
                         .transition(.opacity)
                 }
@@ -163,6 +165,49 @@ struct ActionBar: View {
             .accessibilityLabel("Show the roll")
             .accessibilityValue(isStripVisible ? "on" : "off")
             .accessibilityAction(named: "Browse the roll", onBrowseRoll)
+    }
+}
+
+// MARK: - Reset
+
+/// The way back to the look the app ships with.
+///
+/// Grey while that is what is on the sliders and there is nothing to undo, red
+/// and ringed in red the moment anything has moved — which is also the shortest
+/// way to answer *am I looking at the built-in look or at something I made*
+/// without opening the panel and reading forty rows. The ring is what makes it
+/// read as a button worth being careful with rather than as a word that has
+/// gone a different colour.
+///
+/// Watches the look itself, so a slider drag redraws one small button rather
+/// than the bar, the roll and the panel above it.
+private struct ResetButton: View {
+
+    @ObservedObject var look: LookModel
+    var action: () -> Void
+
+    /// Everything counts: a slider, a sub-profile, black and white, a setting
+    /// taken back off the house or the moon by hand. Reset puts all of it back,
+    /// so all of it is what lights the button.
+    private var isChanged: Bool { look.profile != PositiveFilmProfile() }
+
+    var body: some View {
+        Button(action: action) {
+            Text("Reset")
+                .font(.system(size: 13))
+                .foregroundStyle(isChanged ? Color.snapReset : .white.opacity(0.55))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(isChanged ? Color.snapReset : .clear, lineWidth: 1)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.15), value: isChanged)
+        .accessibilityLabel("Reset")
+        .accessibilityValue(isChanged ? "the look has been changed" : "the look is the built-in one")
     }
 }
 
