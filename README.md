@@ -452,8 +452,12 @@ develop from.
 
 **Select** at the top left turns the wall into checkboxes, and what is ticked
 can be shared or deleted together. While it is up, the title that counts what is
-ticked is a dropdown — **Select All**, **Select Today's**, **Deselect All** — so
-an afternoon's frames are one tap rather than forty. Deleting several asks first and says how
+ticked is a dropdown — **Select All**, **Select Today's**, **Select Date…**,
+**Deselect All** — so an afternoon's frames are one tap rather than forty.
+**Select Date…** lists every day the roll has frames from, newest first, with
+how many beside each; picking one ticks that day's frames in place of whatever
+was ticked and scrolls the wall to the first of them, since a day chosen from a
+list may be a long way down it. Deleting several asks first and says how
 many, and the camera roll is asked for the lot in one go — iOS puts its
 confirmation in front of each request, and a dozen frames should be one question
 rather than a dozen. The wall stays in select mode with nothing ticked

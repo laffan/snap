@@ -40,6 +40,11 @@ struct ShotGrid: View {
     /// Picking a few out of the wall. Nil while simply looking.
     @State private var selection: Set<UUID>? = nil
     @State private var isConfirmingDelete = false
+    /// The list of days, opened from the title while picking.
+    @State private var isPickingDay = false
+    /// The frame the wall should bring into view, once. Cleared as soon as it
+    /// has, so picking the same day twice scrolls twice.
+    @State private var scrollTarget: UUID? = nil
 
     /// Three across, and 3pt of black between, the same wall the snapshots
     /// are laid on.
@@ -93,6 +98,12 @@ struct ShotGrid: View {
                 Button("Delete", role: .destructive) { deleteSelected() }
             }
             .sheet(item: $share) { ShareSheet(urls: $0.urls) }
+            .sheet(isPresented: $isPickingDay) {
+                DayList(days: days) { day in
+                    isPickingDay = false
+                    select(day: day.date)
+                }
+            }
         }
         .preferredColorScheme(.dark)
     }
@@ -138,11 +149,15 @@ struct ShotGrid: View {
                     }
 
                     Button {
-                        selection = Set(store.shots
-                            .filter { Calendar.current.isDateInToday($0.createdAt) }
-                            .map(\.id))
+                        select(day: .now)
                     } label: {
-                        Label("Select Today's", systemImage: "calendar")
+                        Label("Select Today's", systemImage: "sun.max")
+                    }
+
+                    Button {
+                        isPickingDay = true
+                    } label: {
+                        Label("Select Date…", systemImage: "calendar")
                     }
 
                     Button {
@@ -160,7 +175,7 @@ struct ShotGrid: View {
                     .foregroundStyle(.white)
                 }
                 .accessibilityLabel(title)
-                .accessibilityHint("Select all, today's, or none")
+                .accessibilityHint("Select all, today's, a date, or none")
             }
         }
     }
@@ -190,6 +205,46 @@ struct ShotGrid: View {
         }
     }
 
+    // MARK: - Days
+
+    /// One calendar day of the roll: when, and how many frames it holds.
+    struct Day: Identifiable {
+        var date: Date
+        var count: Int
+        var id: Date { date }
+    }
+
+    /// Every day with something on it, newest first — the order the wall
+    /// runs in, so the list reads the same way down as the frames do.
+    private var days: [Day] {
+        let calendar = Calendar.current
+        var result: [Day] = []
+        for shot in store.shots {
+            let day = calendar.startOfDay(for: shot.createdAt)
+            if let last = result.last, last.date == day {
+                result[result.count - 1].count += 1
+            } else if let index = result.firstIndex(where: { $0.date == day }) {
+                // The roll is newest first, so this only happens for a frame
+                // whose clock disagreed with its neighbours'.
+                result[index].count += 1
+            } else {
+                result.append(Day(date: day, count: 1))
+            }
+        }
+        return result
+    }
+
+    /// Ticks exactly the frames taken on the day `date` falls in, in place of
+    /// whatever was ticked, and brings the first of them into view: a day
+    /// picked out of a list is a day you want to look at, and it may be a
+    /// long way down the wall.
+    private func select(day date: Date) {
+        let calendar = Calendar.current
+        let picked = store.shots.filter { calendar.isDate($0.createdAt, inSameDayAs: date) }
+        selection = Set(picked.map(\.id))
+        scrollTarget = picked.first?.id
+    }
+
     private func deleteSelected() {
         let doomed = selected
         guard !doomed.isEmpty else { return }
@@ -210,18 +265,28 @@ struct ShotGrid: View {
             let edge = ((geometry.size.width - spacing * CGFloat(count - 1)) / CGFloat(count))
                 .rounded(.down)
 
-            ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(edge), spacing: spacing),
-                                         count: count),
-                          spacing: spacing) {
-                    ForEach(store.shots) { shot in
-                        cell(shot, edge: edge)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(edge), spacing: spacing),
+                                             count: count),
+                              spacing: spacing) {
+                        ForEach(store.shots) { shot in
+                            cell(shot, edge: edge)
+                                .id(shot.id)
+                        }
                     }
+                    .padding(.vertical, spacing)
+                    .animation(.easeOut(duration: 0.2), value: store.shots.count)
                 }
-                .padding(.vertical, spacing)
-                .animation(.easeOut(duration: 0.2), value: store.shots.count)
+                .scrollIndicators(.hidden)
+                .onChange(of: scrollTarget) { _, target in
+                    guard let target else { return }
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                    scrollTarget = nil
+                }
             }
-            .scrollIndicators(.hidden)
         }
     }
 
@@ -290,5 +355,47 @@ struct ShotGrid: View {
             picked.insert(shot.id)
         }
         selection = picked
+    }
+}
+
+/// The roll as a list of days, for ticking one of them on the wall.
+///
+/// A count beside each, since the question is usually *which afternoon was
+/// that* and the size of a day is half of how you remember it.
+private struct DayList: View {
+
+    var days: [ShotGrid.Day]
+    var onPick: (ShotGrid.Day) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(days) { day in
+                Button {
+                    onPick(day)
+                } label: {
+                    HStack {
+                        Text(day.date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day().year()))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Text("\(day.count)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
+                .accessibilityValue(day.count == 1 ? "1 frame" : "\(day.count) frames")
+            }
+            .navigationTitle("Select Date")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .preferredColorScheme(.dark)
     }
 }
