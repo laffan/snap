@@ -211,14 +211,16 @@ Under the shutter is a row of dots, one per lens, widening left to right
 the way the lenses do and filled for the one in use. The exposure controls stand
 in a column rather than a row to leave the middle of that row to the buttons.
 
-**A small flower sits just past the last dot** on a phone whose ultra wide can
+**A small flower sits after the last dot**, in a cell of its own spaced as a
+fourth lens would be, on a phone whose ultra wide can
 autofocus closer than the wide — the iPhone 13 Pro onward, and the plain models
 that gained it later. It is macro, and it is what Apple's macro is: the ultra
 wide, with its autofocus held to the near range so it stops hunting out to the
 horizon past a subject two centimetres away. Lit in the accent while it is on.
 Tapping it again goes back to whichever lens was up before, and tapping any
 dot — the ultra wide's included — ends it, since a lens chosen by hand is
-wanted as it comes. Phones whose ultra wide is fixed focus don't draw it.
+wanted as it comes. Phones whose ultra wide is fixed focus don't draw it. An empty cell the same
+width balances it on the far side, so the dots stay centred under the shutter.
 
 The one thing Apple's version does that this doesn't is crop: the Camera app
 trims the ultra wide down to the wide's field of view, so going macro doesn't

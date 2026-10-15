@@ -875,6 +875,14 @@ struct CameraView: View {
     private var lensPicker: some View {
         if camera.lenses.count > 1 {
             HStack(spacing: 0) {
+                // An empty cell the flower's width on the far side, so the
+                // dots themselves stay centred under the shutter.
+                if camera.isMacroAvailable {
+                    Color.clear
+                        .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
+                        .accessibilityHidden(true)
+                }
+
                 ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
                     let diameter = 7 + CGFloat(index) * 3.5
                     let isCurrent = lens == camera.currentLens
@@ -891,24 +899,25 @@ struct CameraView: View {
                             .frame(width: diameter, height: diameter)
                             // The dot is far too small to aim at; the tap
                             // target isn't.
-                            .frame(width: 26, height: CameraView.controlCellHeight)
+                            .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(lens.name)
                 }
-            }
-            // Hung off the dots' trailing edge rather than laid in the row
-            // with them, so the dots stay centred under the shutter whether
-            // or not this phone has a macro lens to offer.
-            .overlay(alignment: .trailing) {
+
+                // A cell of its own after the last dot, spaced as a fourth
+                // lens would be.
                 if camera.isMacroAvailable {
                     macroToggle
-                        .alignmentGuide(.trailing) { $0[.leading] }
                 }
             }
         }
     }
+
+    /// The width each lens dot is given to be tapped in, and the flower after
+    /// them the same, so it sits in the row as one more stop along it.
+    private static let lensCellWidth: CGFloat = 26
 
     /// The flower Apple's Camera uses for the same thing, lit in the accent
     /// while it is on — it is a setting that changes the photograph, which is
@@ -921,7 +930,7 @@ struct CameraView: View {
             Image(systemName: "camera.macro")
                 .font(.system(size: 11, weight: .regular))
                 .foregroundStyle(camera.isMacroOn ? Color.snapAccent : .white.opacity(0.55))
-                .frame(width: 30, height: CameraView.controlCellHeight)
+                .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
