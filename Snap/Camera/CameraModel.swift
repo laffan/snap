@@ -84,6 +84,17 @@ final class CameraModel: NSObject, ObservableObject {
         var name: String
     }
 
+    /// True when the ultra wide focuses closer than the wide does, which is
+    /// what macro on an iPhone is. False on phones whose ultra wide is fixed
+    /// focus, and there the flower is not drawn.
+    @Published private(set) var isMacroAvailable = false
+
+    /// The ultra wide, held to its near focus range.
+    @Published private(set) var isMacroOn = false
+
+    /// What macro goes back to when it is switched off.
+    private var lensBeforeMacro: Lens?
+
     /// A stored negative being re-filtered in place of the live camera.
     @Published private(set) var versionSource: Shot? = nil
 
@@ -660,15 +671,99 @@ final class CameraModel: NSObject, ObservableObject {
         let active = videoDevice.flatMap { device in
             found.first { $0.deviceType == device.deviceType }
         }
+        let macro = CameraModel.supportsMacro(discovery.devices)
         DispatchQueue.main.async { [weak self] in
             self?.lenses = found
             self?.currentLens = active
+            self?.isMacroAvailable = macro
         }
+    }
+
+    /// Whether the ultra wide is a macro lens on this phone.
+    ///
+    /// Asked of the hardware rather than of a list of models: an ultra wide
+    /// that can autofocus and gets closer than the wide is the whole of what
+    /// Apple's macro is built on. `minimumFocusDistance` is in millimetres,
+    /// and −1 when the device doesn't know.
+    private static func supportsMacro(_ devices: [AVCaptureDevice]) -> Bool {
+        guard let ultraWide = devices.first(where: { $0.deviceType == .builtInUltraWideCamera }),
+              ultraWide.isFocusModeSupported(.continuousAutoFocus),
+              ultraWide.minimumFocusDistance > 0 else { return false }
+        guard let wide = devices.first(where: { $0.deviceType == .builtInWideAngleCamera }),
+              wide.minimumFocusDistance > 0 else { return true }
+        return ultraWide.minimumFocusDistance < wide.minimumFocusDistance
+    }
+
+    /// Macro on or off.
+    ///
+    /// On is the ultra wide, with its autofocus told to look near. Apple's
+    /// Camera does the same with the same lens, and then crops it to the
+    /// wide's field of view; Snap doesn't crop, since a crop here is a zoom,
+    /// and a zoom would have to follow the frame into its negative. At two
+    /// centimetres the subject fills the square without it.
+    ///
+    /// Off goes back to whichever lens was up when it went on.
+    func toggleMacro() {
+        if isMacroOn {
+            let back = lensBeforeMacro
+                ?? lenses.first { $0.deviceType == .builtInWideAngleCamera }
+            endMacro()
+            if let back { selectLens(back) }
+            return
+        }
+
+        guard isMacroAvailable,
+              let ultraWide = lenses.first(where: { $0.deviceType == .builtInUltraWideCamera }) else { return }
+        lensBeforeMacro = currentLens
+        switchLens(to: ultraWide)
+        isMacroOn = true
+        // Queued behind the swap, so it lands on the ultra wide.
+        applyMacroFocus(true)
+    }
+
+    /// Lets go of the near range without moving lens.
+    private func endMacro() {
+        guard isMacroOn else { return }
+        isMacroOn = false
+        lensBeforeMacro = nil
+        applyMacroFocus(false)
+    }
+
+    /// Holds the autofocus to the near range, or lets it roam again.
+    ///
+    /// Not every lens offers the restriction; where it doesn't, macro is the
+    /// ultra wide's own continuous autofocus, which reaches its closest
+    /// distance anyway and only hunts a little more on the way. The setting
+    /// lives on the device, which outlasts the session's hold on it, so it is
+    /// cleared on the way out rather than left for the next visit to find.
+    private func applyMacroFocus(_ near: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let device = self?.videoDevice,
+                  device.deviceType == .builtInUltraWideCamera else { return }
+            do {
+                try device.lockForConfiguration()
+                // The focus mode is left alone: a point held by a long press
+                // stays held, and the range applies to whichever is running.
+                if device.isAutoFocusRangeRestrictionSupported {
+                    device.autoFocusRangeRestriction = near ? .near : .none
+                }
+                device.unlockForConfiguration()
+            } catch {
+            }
+        }
+    }
+
+    /// A lens chosen by hand, which is also the end of macro: the dots say
+    /// which glass is in use, and choosing one — the ultra wide included —
+    /// means wanting it as it comes.
+    func selectLens(_ lens: Lens) {
+        endMacro()
+        switchLens(to: lens)
     }
 
     /// Swaps the session's input. RAW support is per-lens, so it is resolved
     /// again afterwards rather than carried over.
-    func selectLens(_ lens: Lens) {
+    private func switchLens(to lens: Lens) {
         guard lens != currentLens else { return }
 
         sessionQueue.async { [weak self] in

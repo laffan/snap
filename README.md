@@ -211,12 +211,48 @@ Under the shutter is a row of dots, one per lens, widening left to right
 the way the lenses do and filled for the one in use. The exposure controls stand
 in a column rather than a row to leave the middle of that row to the buttons.
 
+**A small flower sits just past the last dot** on a phone whose ultra wide can
+autofocus closer than the wide — the iPhone 13 Pro onward, and the plain models
+that gained it later. It is macro, and it is what Apple's macro is: the ultra
+wide, with its autofocus held to the near range so it stops hunting out to the
+horizon past a subject two centimetres away. Lit in the accent while it is on.
+Tapping it again goes back to whichever lens was up before, and tapping any
+dot — the ultra wide's included — ends it, since a lens chosen by hand is
+wanted as it comes. Phones whose ultra wide is fixed focus don't draw it.
+
+The one thing Apple's version does that this doesn't is crop: the Camera app
+trims the ultra wide down to the wide's field of view, so going macro doesn't
+seem to change lens. Here a crop would be a zoom, which is on the list of
+things deliberately not here, and it would have to follow the frame into its
+negative, its DNG crop and its sidecar. The full ultra-wide square is what you
+get, and at that distance the subject fills it anyway.
+
 Exposure steps in whole stops and is the same value as the panel's Exposure
 slider — one setting reachable two ways. Holding the number between the two
 steps for half a second clears it back to zero, which beats nine taps home from
 five stops out. It is a develop setting rather than a camera one, so it
 re-applies when a negative is re-developed and travels to Lightroom as
 `crs:Exposure2012`.
+
+**A stop moves the shadows a stop and the highlights much less.** It used to be
+`CIExposureAdjust`, a straight multiply in linear light, which is what a stop
+means at a sensor and not what it means to a picture that has already been
+rendered — and the preview is Apple's rendered video frame. Its white is the
+top of a shoulder, not a measurement of the light, so multiplying it took white
+down to 188/255 at one stop under, every tone down by the same ratio, and left
+the frame looking like itself under a grey sheet.
+
+Now the shoulder is unrolled, the stops applied, and the shoulder rolled back:
+`shoulder(gain · shoulder⁻¹(x))`, in linear light, with `shoulder(s) = 5s /
+(1 + 4s)`. At one stop under, shadows go down a full stop, mid grey 0.9, and
+white only to 235/255 — the difference between the two ends grows rather than
+shrinks, which is the contrast a camera keeps when it is told to expose darker.
+Over, the highlights roll into white instead of piling up against it. Steps
+still add (+1 then −1 is where you started), and the curve is never more than
+1.6× steeper than what goes into it, so even five stops down doesn't band a sky.
+It is a per-channel `CIColorCurves` ahead of the rest of the grade, in the same
+place the multiply was. What it can't do is Apple's local tone mapping, which
+treats each part of the frame differently; this is one curve for all of it.
 
 Tap a thumbnail to open it in the viewer, where the shutter becomes an **X**
 that returns to the live preview. The X is half the shutter's size, about as
@@ -413,7 +449,9 @@ and holding one offers keep, **Share JPEG**, **Share RAW** and **Delete Image**
 develop from.
 
 **Select** at the top left turns the wall into checkboxes, and what is ticked
-can be shared or deleted together. Deleting several asks first and says how
+can be shared or deleted together. While it is up, the title that counts what is
+ticked is a dropdown — **Select All**, **Select Today's**, **Deselect All** — so
+an afternoon's frames are one tap rather than forty. Deleting several asks first and says how
 many, and the camera roll is asked for the lot in one go — iOS puts its
 confirmation in front of each request, and a dozen frames should be one question
 rather than a dozen. The wall stays in select mode with nothing ticked

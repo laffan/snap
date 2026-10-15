@@ -86,7 +86,7 @@ struct ShotGrid: View {
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { leadingItem; trailingItem }
+            .toolbar { leadingItem; titleMenu; trailingItem }
             .confirmationDialog(deletePrompt,
                                 isPresented: $isConfirmingDelete,
                                 titleVisibility: .visible) {
@@ -118,6 +118,49 @@ struct ShotGrid: View {
                 Button("Cancel") { selection = nil }
             } else if !store.shots.isEmpty {
                 Button("Select") { selection = [] }
+            }
+        }
+    }
+
+    /// While picking, the title is also how to pick in bulk: tap it for the
+    /// whole wall, today's frames, or none. It sits where the count it
+    /// changes is already written, and a dropdown keeps the bar to the two
+    /// things that act on what is ticked.
+    @ToolbarContentBuilder
+    private var titleMenu: some ToolbarContent {
+        if isSelecting {
+            ToolbarItem(placement: .principal) {
+                Menu {
+                    Button {
+                        selection = Set(store.shots.map(\.id))
+                    } label: {
+                        Label("Select All", systemImage: "checkmark.circle")
+                    }
+
+                    Button {
+                        selection = Set(store.shots
+                            .filter { Calendar.current.isDateInToday($0.createdAt) }
+                            .map(\.id))
+                    } label: {
+                        Label("Select Today's", systemImage: "calendar")
+                    }
+
+                    Button {
+                        selection = []
+                    } label: {
+                        Label("Deselect All", systemImage: "circle")
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(title)
+                            .font(.headline)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                }
+                .accessibilityLabel(title)
+                .accessibilityHint("Select all, today's, or none")
             }
         }
     }

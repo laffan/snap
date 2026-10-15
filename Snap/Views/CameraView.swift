@@ -898,7 +898,35 @@ struct CameraView: View {
                     .accessibilityLabel(lens.name)
                 }
             }
+            // Hung off the dots' trailing edge rather than laid in the row
+            // with them, so the dots stay centred under the shutter whether
+            // or not this phone has a macro lens to offer.
+            .overlay(alignment: .trailing) {
+                if camera.isMacroAvailable {
+                    macroToggle
+                        .alignmentGuide(.trailing) { $0[.leading] }
+                }
+            }
         }
+    }
+
+    /// The flower Apple's Camera uses for the same thing, lit in the accent
+    /// while it is on — it is a setting that changes the photograph, which is
+    /// what that colour is kept for.
+    private var macroToggle: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            camera.toggleMacro()
+        } label: {
+            Image(systemName: "camera.macro")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(camera.isMacroOn ? Color.snapAccent : .white.opacity(0.55))
+                .frame(width: 30, height: CameraView.controlCellHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Macro")
+        .accessibilityValue(camera.isMacroOn ? "On" : "Off")
     }
 
     @ViewBuilder

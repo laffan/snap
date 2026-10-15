@@ -48,12 +48,17 @@ final class PositiveFilmFilter {
     private let cubeData: Data
     private let workingColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
 
+    /// The exposure as a curve over linear light, or nil at zero.
+    private let exposureCurve: Data?
+    private let linearColorSpace = CGColorSpace(name: CGColorSpace.linearSRGB)!
+
     init(profile: PositiveFilmProfile = PositiveFilmProfile(),
          resolution: Resolution = .final) {
         self.profile = profile
         self.resolution = resolution
         self.cubeData = PositiveFilmFilter.makeCubeData(profile: profile,
                                                         dimension: resolution.rawValue)
+        self.exposureCurve = PositiveFilmFilter.makeExposureCurve(stops: profile.exposure)
     }
 
     // MARK: - Applying the look
@@ -69,11 +74,15 @@ final class PositiveFilmFilter {
         var output = image.clampedToExtent()
 
         // 1. Exposure, first, so everything downstream sees the tones the
-        //    photograph is actually meant to have. A linear gain in the working
-        //    space, which is what a stop means.
-        if profile.exposure != 0 {
-            output = output.applyingFilter("CIExposureAdjust",
-                                           parameters: ["inputEV": profile.exposure])
+        //    photograph is actually meant to have. Moved along a shoulder
+        //    rather than multiplied — see `makeExposureCurve`.
+        if let exposureCurve {
+            let curve = CIFilter.colorCurves()
+            curve.inputImage = output
+            curve.curvesData = exposureCurve
+            curve.curvesDomain = CIVector(x: 0, y: 1)
+            curve.colorSpace = linearColorSpace
+            output = curve.outputImage ?? output
         }
 
         // 2. Highlight recovery and shadow lift, before anything steepens the
@@ -115,6 +124,65 @@ final class PositiveFilmFilter {
         output = cube.outputImage ?? output
 
         return output.cropped(to: extent)
+    }
+
+    // MARK: - Exposure
+
+    /// How hard the highlights are assumed to have been rolled off already.
+    ///
+    /// At 4, white in the frame is taken to sit at 80% of the brightest thing
+    /// the scene could hold — a strong shoulder, which is what Apple's own
+    /// rendering of the video frames has.
+    private static let exposureShoulder: Float = 4
+
+    /// Samples in the exposure curve. It is close to a straight line through
+    /// the shadows, where linear light crowds its values, so 1024 is plenty.
+    private static let exposureCurveSamples = 1024
+
+    /// Exposure as a move along a film-like shoulder, sampled for
+    /// `CIColorCurves`.
+    ///
+    /// What the preview reaches this with is a frame that has already been
+    /// rendered — the video stream is Apple's finished picture — so its white
+    /// is the top of a shoulder rather than a measurement of the light. A
+    /// plain gain treats it as the light: one stop down drags white to 188/255, everything in the
+    /// frame goes down by the same ratio, and the frame reads as the same
+    /// picture under a grey veil.
+    ///
+    /// So the shoulder is unrolled, the stops applied to that, and the
+    /// shoulder rolled back on. The shadows move by the full amount, where a
+    /// stop is a stop; the midtones by most of it; the highlights by much
+    /// less, since they were the part already compressed. One stop down
+    /// leaves white at 235/255 and the shadows a full stop deeper, which is
+    /// contrast kept rather than lost. Up, the highlights roll into white
+    /// instead of piling up against it.
+    ///
+    /// `shoulder(s) = (1 + k)s / (1 + ks)` maps 0→0 and 1→1, and moving by
+    /// `g = 2^stops` is `shoulder(g · shoulder⁻¹(x))`. Moves compose — +1
+    /// then −1 is where you started — and the curve is never more than about
+    /// 1.6× steeper than the input, so 8-bit skies don't band at −5.
+    ///
+    /// The curve's domain stops at white. Anything a RAW development carries
+    /// above 1 is held there on the way in, which costs only what a stop
+    /// down used to pull back from above white before the lookup table
+    /// clamped it.
+    private static func makeExposureCurve(stops: Float) -> Data? {
+        guard stops != 0 else { return nil }
+
+        let k = exposureShoulder
+        let gain = pow(2, stops)
+        let last = Float(exposureCurveSamples - 1)
+
+        var values = [Float]()
+        values.reserveCapacity(exposureCurveSamples * 3)
+        for index in 0..<exposureCurveSamples {
+            let x = Float(index) / last
+            let scene = x / ((1 + k) - k * x)
+            let moved = gain * scene
+            let y = min((1 + k) * moved / (1 + k * moved), 1)
+            values.append(contentsOf: [y, y, y])
+        }
+        return values.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
     // MARK: - Baking the lookup table
