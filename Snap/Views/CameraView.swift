@@ -868,21 +868,15 @@ struct CameraView: View {
                        subProfiles: shot.profile.activeSubProfiles)
     }
 
-    /// One dot per lens, widening left to right the way the lenses do, centred
-    /// under the shutter. Hidden on a single-camera device, where there is
+    /// One dot per lens, widening left to right the way the lenses do, and
+    /// the macro flower after them, centred under the shutter together. Hidden on a single-camera device, where there is
     /// nothing to choose.
     @ViewBuilder
     private var lensPicker: some View {
         if camera.lenses.count > 1 {
+            // The dots and the flower are centred as one row, the flower
+            // counted as a fourth stop along it.
             HStack(spacing: 0) {
-                // An empty cell the flower's width on the far side, so the
-                // dots themselves stay centred under the shutter.
-                if camera.isMacroAvailable {
-                    Color.clear
-                        .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
-                        .accessibilityHidden(true)
-                }
-
                 ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
                     let diameter = 7 + CGFloat(index) * 3.5
                     let isCurrent = lens == camera.currentLens

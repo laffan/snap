@@ -219,8 +219,8 @@ wide, with its autofocus held to the near range so it stops hunting out to the
 horizon past a subject two centimetres away. Lit in the accent while it is on.
 Tapping it again goes back to whichever lens was up before, and tapping any
 dot — the ultra wide's included — ends it, since a lens chosen by hand is
-wanted as it comes. Phones whose ultra wide is fixed focus don't draw it. An empty cell the same
-width balances it on the far side, so the dots stay centred under the shutter.
+wanted as it comes. Phones whose ultra wide is fixed focus don't draw it. The dots and the flower
+are centred under the shutter as one row.
 
 The one thing Apple's version does that this doesn't is crop: the Camera app
 trims the ultra wide down to the wide's field of view, so going macro doesn't
