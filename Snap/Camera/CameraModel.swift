@@ -139,6 +139,26 @@ final class CameraModel: NSObject, ObservableObject {
         didSet { if !isAdjustingExposure { applyExposure() } }
     }
 
+    /// Exposure compensation at the sensor, in stops — the stepper beside the
+    /// shutter.
+    ///
+    /// It moves the meter's target rather than the picture: told to sit a stop
+    /// under, the camera takes in a stop less light, so a highlight that was
+    /// clipping now arrives with its detail in it. Nothing done to a frame
+    /// after it is taken can do that — a pixel that reached white came off the
+    /// sensor as white — which is why this is a camera setting and the panel's
+    /// Exposure is a different one.
+    ///
+    /// It is the meter's target, so it holds in either priority as well as in
+    /// auto: `exposureTargetOffset` is measured against the biased target, and
+    /// that offset is what the unpinned half is nudged toward. With both pinned
+    /// it moves where the EV readout's zero is and nothing else, the way
+    /// compensation does on any camera in manual. Apple writes it into the
+    /// capture's EXIF as `ExposureBiasValue`.
+    @Published var exposureBias: Float = 0 {
+        didSet { if exposureBias != oldValue { applyExposureBias() } }
+    }
+
     /// True while both pins are being moved together, so the device is
     /// configured once for the pair rather than once per half.
     private var isAdjustingExposure = false
@@ -535,6 +555,24 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
+    /// Pushes the compensation to the device, within what this lens allows.
+    ///
+    /// Held per device, so a lens swap has to send it again.
+    private func applyExposureBias() {
+        let bias = exposureBias
+
+        sessionQueue.async { [weak self] in
+            guard let device = self?.videoDevice else { return }
+            let clamped = min(max(bias, device.minExposureTargetBias), device.maxExposureTargetBias)
+            do {
+                try device.lockForConfiguration()
+                device.setExposureTargetBias(clamped, completionHandler: nil)
+                device.unlockForConfiguration()
+            } catch {
+            }
+        }
+    }
+
     /// What the camera is doing, watched in three places at once.
     ///
     /// `exposureTargetOffset` is how far the current exposure sits from what
@@ -799,6 +837,7 @@ final class CameraModel: NSObject, ObservableObject {
                 self.releaseFocus()
                 self.startMetering()
                 self.applyExposure()
+                self.applyExposureBias()
             }
         }
     }

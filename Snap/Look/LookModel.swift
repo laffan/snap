@@ -99,8 +99,8 @@ final class LookModel: ObservableObject {
     /// back off whichever one is holding it.
     ///
     /// The develop panel's Temperature, Exposure and Shadows sliders write
-    /// through here, and so do the exposure stepper and the meter readout on
-    /// the camera screen — the two other ways Exposure is reached. One mutation
+    /// through here, and so does the meter readout on the camera screen — the
+    /// other way Exposure is reached. One mutation
     /// rather than two, so a drag costs one bake per tick rather than two.
     ///
     /// The claim is recorded even when the number lands where it already was:

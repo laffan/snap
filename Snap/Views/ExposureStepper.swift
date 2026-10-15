@@ -4,8 +4,9 @@
 //
 //  Exposure compensation, stacked beside the shutter.
 //
-//  The same value the panel's Exposure slider moves — this is just the fast
-//  way to reach it, in whole stops.
+//  A stepper over whatever value it is handed. Beside the shutter that is the
+//  camera's own compensation, in thirds of a stop the way a camera's dial
+//  moves.
 //
 
 import SwiftUI
@@ -15,11 +16,13 @@ struct ExposureStepper: View {
 
     @Binding var value: Float
     var range: ClosedRange<Float>
+    /// How far one press moves it, in stops.
+    var step: Float = 1
 
     private var label: String {
         guard abs(value) >= 0.05 else { return "0" }
-        // Whole stops read as "+1"; anything the slider left in between keeps
-        // a decimal so the two controls never disagree about the value.
+        // Whole stops read as "+1", and a third as "+0.3" — a decimal only
+        // where there is one to show.
         let rounded = (value * 10).rounded() / 10
         return rounded == rounded.rounded()
             ? String(format: "%+.0f", rounded)
@@ -28,13 +31,15 @@ struct ExposureStepper: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            step("plus", enabled: value < range.upperBound) {
-                value = min(range.upperBound, value.rounded(.down) + 1)
+            stepButton("plus", enabled: value < range.upperBound) {
+                // Snapped to the step, so a value left between two stops
+                // lands on the next one rather than carrying its remainder.
+                let next = ((value / step + 0.001).rounded(.down) + 1) * step
+                value = min(range.upperBound, next)
             }
 
             // Holding the number between the two steps clears it. Stepping
-            // back to zero from five stops out is nine taps; this is one, and
-            // it lands on the same value the panel's slider reads.
+            // back to zero from three stops out is nine taps; this is one.
             Text(label)
                 .font(.system(size: 13, weight: .medium))
                 .monospacedDigit()
@@ -47,8 +52,9 @@ struct ExposureStepper: View {
                     value = 0
                 }
 
-            step("minus", enabled: value > range.lowerBound) {
-                value = max(range.lowerBound, value.rounded(.up) - 1)
+            stepButton("minus", enabled: value > range.lowerBound) {
+                let next = ((value / step - 0.001).rounded(.up) - 1) * step
+                value = max(range.lowerBound, next)
             }
         }
         .accessibilityElement(children: .combine)
@@ -57,7 +63,7 @@ struct ExposureStepper: View {
         .accessibilityAction(named: "Reset to zero") { value = 0 }
     }
 
-    private func step(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func stepButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .semibold))
@@ -73,6 +79,6 @@ struct ExposureStepper: View {
 #Preview {
     ZStack {
         Color.black.ignoresSafeArea()
-        ExposureStepper(value: .constant(-2), range: -5...5)
+        ExposureStepper(value: .constant(-2), range: -3...3, step: 1.0 / 3)
     }
 }

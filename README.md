@@ -206,7 +206,7 @@ the screen was.
 
 Below the frame sit the exposure column at the left, then black-and-white, the
 shutter and **PS** across the middle, the two round buttons equally far from
-their own edge of the screen. The develop Exposure stepper sits at the right.
+their own edge of the screen. The exposure compensation stepper sits at the right.
 Under the shutter is a row of dots, one per lens, widening left to right
 the way the lenses do and filled for the one in use. The exposure controls stand
 in a column rather than a row to leave the middle of that row to the buttons.
@@ -229,14 +229,30 @@ things deliberately not here, and it would have to follow the frame into its
 negative, its DNG crop and its sidecar. The full ultra-wide square is what you
 get, and at that distance the subject fills it anyway.
 
-Exposure steps in whole stops and is the same value as the panel's Exposure
-slider — one setting reachable two ways. Holding the number between the two
-steps for half a second clears it back to zero, which beats nine taps home from
-five stops out. It is a develop setting rather than a camera one, so it
-re-applies when a negative is re-developed and travels to Lightroom as
-`crs:Exposure2012`.
+**The stepper is the camera's exposure compensation**, in thirds of a stop
+across ±3, the way a camera's dial moves. It tells the meter where to aim
+rather than darkening the picture afterwards: a third of a stop under and the
+sensor takes in a third of a stop less light, in auto and in either priority
+alike, since both steer by the meter. Holding the number between the two steps
+for half a second clears it back to zero. Apple records it in the frame's EXIF
+as `ExposureBiasValue`.
 
-**A stop moves the shadows a stop and the highlights much less.** It used to be
+It used to be the panel's Exposure slider reached a quicker way, and that is
+what made it useless at the one thing compensation is for. Point the camera at
+a scene with a patch of sunlit flowers burning out to white and step down: the
+develop Exposure darkens a picture already taken, and a pixel that came off the
+sensor as white has nothing behind it to darken into — the scene went down
+around a white patch that stayed a white patch. Apple's Camera brings the
+petals back because it changes what the sensor collects, and now so does this.
+
+**The panel's Exposure slider is the other exposure**, a develop setting: it
+re-applies when a negative is re-developed and travels to Lightroom as
+`crs:Exposure2012`. The two are separate numbers on purpose. One decides what
+light the photograph is made of, the other what is done with it afterwards, and
+only the first can recover a highlight.
+
+**On the slider, a stop moves the shadows a stop and the highlights much
+less.** It used to be
 `CIExposureAdjust`, a straight multiply in linear light, which is what a stop
 means at a sensor and not what it means to a picture that has already been
 rendered — and the preview is Apple's rendered video frame. Its white is the
@@ -712,10 +728,11 @@ the photograph did not, which is the one thing a develop panel may never do.
 So the hand wins. **Taking hold of one of those sliders takes that setting back
 off the sub-profile**, and the sub-profile leaves it alone from then on — the
 rest of what it sets carries on as before. Every slider in the panel changes the
-photograph, whatever is lit above the shutter. It is the same for the two other
-ways Exposure is reached, the stepper beside the frame and the tap on the EV
-readout, since they are the same setting and a control that reported a value
-rather than making one would be no better there.
+photograph, whatever is lit above the shutter. It is the same for the other way
+Exposure is reached, the tap on the EV readout, since it is the same setting and
+a control that reported a value rather than making one would be no better
+there. (The stepper beside the frame is the camera's compensation rather than
+this setting, so Night has nothing of its to hold.)
 
 **Switching a sub-profile off and on again hands it back.** A toggle has to mean
 the same thing every time it is pressed, and a correction that remembered which
@@ -1212,7 +1229,7 @@ What the app was left in the middle of last time has nothing to do with it: a
 negative under the sliders, the favourites open, an exposure pinned five stops
 out, a look three sliders from the one it ships with. So arriving this way puts
 all of it back — capture screen, auto exposure, the wide lens, the built-in
-profile, Exposure at zero — and a camera reached in a hurry is the camera you
+profile, both exposures at zero — and a camera reached in a hurry is the camera you
 learned rather than the one you left. Opening the app any other way is
 untouched: coming back to it is coming back to what you were doing.
 

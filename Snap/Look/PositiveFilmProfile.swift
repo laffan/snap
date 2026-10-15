@@ -28,8 +28,9 @@ struct PositiveFilmProfile: Codable, Equatable {
     ///
     /// A develop setting rather than a camera one, so it re-applies when a
     /// stored negative is re-filtered and travels to Lightroom as
-    /// `crs:Exposure2012`. The stepper beside the shutter and the slider in the
-    /// panel move this same value.
+    /// `crs:Exposure2012`. The panel's slider moves it. The stepper beside the
+    /// shutter does not: that is the camera's own compensation, which is the
+    /// only one of the two that can bring a clipped highlight back.
     var exposure: Float = 0
 
     /// Lightroom Contrast, −100...100.
@@ -190,7 +191,7 @@ struct PositiveFilmProfile: Codable, Equatable {
     }
 
     /// Moves one setting by hand, and takes it off any sub-profile that names
-    /// it. Every slider and stepper that writes one of these goes through here.
+    /// it. Every control that writes one of these goes through here.
     mutating func setByHand(_ setting: SubProfile.Setting, to value: Float) {
         self[keyPath: setting.keyPath] = value
         overrides.insert(setting)

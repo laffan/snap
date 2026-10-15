@@ -730,7 +730,7 @@ struct CameraView: View {
 
                     Spacer()
 
-                    ExposureControl(look: camera.look)
+                    ExposureControl(camera: camera)
                 }
                 .padding(.horizontal, 14)
             }
@@ -1272,6 +1272,7 @@ struct CameraView: View {
 
         camera.endVersioning()
         camera.releaseExposure()
+        camera.exposureBias = 0
         camera.releaseFocus()
         camera.selectDefaultLens()
         camera.look.reset()
@@ -1405,7 +1406,7 @@ private struct ExposureMeterReadout: View {
 
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            // By hand, like the slider and the stepper: a correction the
+            // By hand, like the slider: a correction the
             // photographer asked for is not one Night gets to put back.
             look.setByHand(.exposure, to: min(max(-offset, -5), 5))
         } label: {
@@ -1543,20 +1544,24 @@ private struct SubProfileToggles: View {
     }
 }
 
-/// Owns the binding to the look's exposure, so the stepper stays in step with
-/// the panel's slider and only this redraws when either moves.
+/// The stepper beside the shutter, on the camera's own exposure
+/// compensation.
 ///
-/// It writes by hand, the way the panel's Exposure slider does: a stepper that
-/// counted stops while Night quietly held the exposure at −0.6 would be a
-/// control that reported a setting rather than made one.
+/// It used to move the develop Exposure, the same value as the panel's
+/// slider. That darkens a picture that has already been taken, and a
+/// highlight that came off the sensor as white stays white however dark the
+/// rest goes — so a patch of sunlit flowers never came back. Moving the
+/// meter's target instead takes in less light, which is the only way they
+/// do. The panel's slider is still the develop Exposure, for re-developing.
+///
+/// Thirds of a stop across ±3, the step and the reach of a camera's dial: a
+/// whole stop is too coarse to set a highlight by.
 private struct ExposureControl: View {
 
-    @ObservedObject var look: LookModel
+    @ObservedObject var camera: CameraModel
 
     var body: some View {
-        ExposureStepper(value: Binding(get: { look.profile.exposure },
-                                       set: { look.setByHand(.exposure, to: $0) }),
-                        range: -5...5)
+        ExposureStepper(value: $camera.exposureBias, range: -3...3, step: 1.0 / 3)
     }
 }
 
