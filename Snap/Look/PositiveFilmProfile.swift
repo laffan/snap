@@ -119,6 +119,21 @@ struct PositiveFilmProfile: Codable, Equatable {
     var greenPrimary = Primary(hue: -10, saturation:   0)
     var bluePrimary  = Primary(hue: +10, saturation: -10)
 
+    /// How far the frame is taken towards colour infrared film, 0...100.
+    ///
+    /// Infrared film records three layers shifted one place down the
+    /// spectrum: the red layer sees infrared, the green sees red, the blue
+    /// sees green. Foliage reflects infrared strongly and comes out red; a sky
+    /// has almost none and stays blue; skin goes pale. A phone's sensor sits
+    /// behind a filter that stops infrared, so the infrared record here is an
+    /// estimate made from the colour of the scene — see
+    /// `PositiveFilmFilter.infrared` — and the other two are the real thing,
+    /// moved along.
+    ///
+    /// Zero by default, and set by the Infrared sub-profile rather than kept
+    /// in the base look.
+    var infrared: Float = 0
+
     // MARK: - RAW
 
     /// How much of Apple's global tone curve to keep when developing a RAW
@@ -254,6 +269,9 @@ struct PositiveFilmProfile: Codable, Equatable {
 
     /// `CIRAWFilter.boostAmount`, 0...1.
     var rawBoostAmount: Float { rawBoost / 100 }
+
+    /// How much of the infrared mapping is laid over the grade, 0...1.
+    var infraredAmount: Float { min(max(infrared, 0), 100) / 100 }
 }
 
 // MARK: - Lenient decoding
@@ -274,6 +292,7 @@ extension PositiveFilmProfile {
         case toneCurveS, blackLift
         case bands
         case redPrimary, greenPrimary, bluePrimary
+        case infrared
         case rawBoost
         case subProfiles, overrides
     }
@@ -306,6 +325,7 @@ extension PositiveFilmProfile {
         toneCurveS = float(.toneCurveS, toneCurveS)
         blackLift  = float(.blackLift, blackLift)
 
+        infrared    = float(.infrared, infrared)
         rawBoost    = float(.rawBoost, rawBoost)
 
         // A raw value this build doesn't know throws, and the whole set falls
@@ -386,6 +406,7 @@ extension PositiveFilmProfile {
             compare("Calibration \(name) Hue", primary.hue, reference.hue)
             compare("Calibration \(name) Saturation", primary.saturation, reference.saturation)
         }
+        compare("Infrared", infrared, base.infrared)
 
         compare("Apple Tone Curve", rawBoost, base.rawBoost)
 

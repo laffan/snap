@@ -34,7 +34,7 @@ resolution.
 | File | Role |
 | --- | --- |
 | `Look/PositiveFilmProfile.swift` | The look, written in Lightroom slider units. **Edit this to change the defaults.** |
-| `Look/SubProfile.swift` | Indoor and Night, laid over the look rather than into it |
+| `Look/SubProfile.swift` | Indoor, Night and Infrared, laid over the look rather than into it |
 | `Look/PositiveFilmFilter.swift` | Bakes the profile into a 3D LUT and applies the Core Image chain |
 | `Look/LookModel.swift` | Holds the live profile and keeps a baked filter in step with it |
 | `Look/ColorMath.swift` | HSV conversion, tone curves, black point, vibrance |
@@ -61,6 +61,8 @@ resolution.
 | `Views/PreviewRenderer.swift` | Draws graded frames into Metal |
 | `Views/HardwareShutter.swift` | The volume buttons, on the same shutter the finger has |
 | `LaunchRoute.swift` | The one URL the app answers to, and what it means |
+| `Views/StreetPad.swift` | The Phone app's keypad, with a camera behind it |
+| `Camera/StreetPadSession.swift` | What a dialled number means, the run of frames it starts, and the level guide |
 
 ## Which way up
 
@@ -330,10 +332,33 @@ photograph, and the photograph has to still be there.
 **Swipe the frame** left or right to move along the roll. Left carries it the
 way the strip runs — newest at the left, older to the right — so a swipe goes
 to the older frame and back again, and stops at each end rather than wrapping
-round to the other one. The swipe is deliberately long, and has to be decidedly
-sideways, so a hold that wandered still peeks at the negative instead of turning
-the page. It works the same way over a negative loaded under the sliders, where
-it walks only the frames that have a negative to develop.
+round to the other one.
+
+**The frame is held rather than swapped.** It follows the finger point for
+point, with the frame either side of it laid alongside across a thin black gap,
+the way frames sit on a strip of film — so pulling one away pulls the next one
+in after it. Let go past a third of the way, or flick hard enough that it would
+have got there, and the reel carries on to the next stop at the speed it was
+let go; let go short and slow and it springs back. At either end of the roll
+there is nothing to pull in, so the frame gives a quarter as much and comes
+back: the stop is felt rather than hit. It used to be a cut — nothing moved
+under the finger, and on lifting one photograph simply replaced the other —
+which made the one gesture on this screen that is about *going somewhere* the
+one that showed no going.
+
+The neighbours are real frames, loaded as they are laid out, so the one that
+arrives is already the photograph. Only the frame in the middle develops its
+negative for the peek, since that is the expensive half and a neighbour never
+needs it until it is the one in the middle. The swipe still has to be decidedly
+sideways — its direction is settled by its first move — so a hold that wandered
+peeks at the negative instead of turning the page, and a drag that starts
+downward opens the loupe and never drags the frame along.
+
+It works the same way over a negative loaded under the sliders, where it walks
+only the frames that have a negative to develop — but there it is still a cut.
+That negative is drawn into one Metal view from a development, and its
+neighbours are negatives nobody has developed yet, so there is nothing to lay
+beside it.
 
 ### The loupe
 
@@ -703,14 +728,19 @@ taken. Under a warm lamp it comes out yellow, because a profile that assumes
 curve built to open shadows opens the sensor noise living in them.
 
 Both are corrections rather than changes of mind about the look, so they don't
-touch it. **Two small buttons above the shutter** — a house and a moon — lay a
-named handful of settings over the top of the base profile, lit in the one
-colour this interface has for something switched on:
+touch it. **Three small buttons above the shutter** — a house, a moon and a
+leaf — lay a named handful of settings over the top of the base profile, lit in
+the one colour this interface has for something switched on:
 
 | | Sets |
 | --- | --- |
 | **Indoor** | Temperature −20, which takes the yellow off a lamp-lit room without pretending it is daylight |
 | **Night** | Exposure −0.6 and Shadows −40 — down, and shadows *closed* rather than opened, since what is in the shadows of a dark frame is mostly noise |
+| **Infrared** | Infrared 100 — colour infrared film, described under [Infrared](#infrared) |
+
+The third is not a correction for a room but a different film, and it is here
+rather than among the sliders because it is the same kind of switch: a few
+settings laid over whatever the base is, gone again with the same tap.
 
 A sub-profile *sets* the settings it names rather than nudging them, so a toggle
 means the same thing wherever the base happens to be sitting, and switching it
@@ -753,8 +783,8 @@ sub-profile still switchable rather than baked into numbers nobody can pick
 apart again. **Use Develop Settings** on such a frame lights the same buttons it
 was taken with.
 
-A frame taken with one lit says so on the review screen: the same house or moon
-sits beside its shutter speed, in the same yellow.
+A frame taken with one lit says so on the review screen: the same house, moon
+or leaf sits beside its shutter speed, in the same yellow.
 
 ### Temperature
 
@@ -776,6 +806,39 @@ file's white balance in Kelvin and reserves `crs:IncrementalTemperature` for
 relative edits, which it may well ignore on a DNG; the sidecar writes it anyway
 when it is non-zero, and where it is ignored the negative opens at the
 temperature it was shot at, which is the honest fallback.
+
+### Infrared
+
+Colour infrared film records three layers each shifted one band down the
+spectrum: its red layer sees infrared, its green sees red, its blue sees green,
+and blue light is filtered off altogether. Foliage reflects infrared strongly —
+chlorophyll is transparent to it — so trees come out red and pink; a sky has
+almost none and goes deep blue; skin turns pale and waxy; a red flower comes out
+yellow.
+
+A phone sensor sits behind a filter that stops infrared, so there is no
+infrared record to use. The other two layers are real — the graded red moves to
+green and the graded green to blue — and the red is given an *estimate*: the
+scene's brightness, leaning on green, raised by how much greener than blue a
+colour is and lowered by how much bluer. That is roughly what reflects infrared
+and what doesn't, and its weights sum to one over a neutral, so grey stays grey
+and white stays white. It is a simulation and reads as one up close — a green
+car comes out as red as a tree does — but it gets the four things the film is
+recognised by.
+
+It is a stage in the lookup table like every other function of colour, so the
+preview and the capture are identical. The estimate is taken from the scene
+before the look's own colour mixer, which crushes greens, and the mapping is
+laid on *after* it, since the look takes purple and magenta almost out and
+those are the colours infrared foliage comes out as. With black and white on as
+well, the frame is the infrared record on its own: white trees under a black
+sky, which is black-and-white infrared film.
+
+The amount is a slider, **Infrared** under Calibration, 0 to 100, and the
+sub-profile sets it to 100. Like Temperature under Indoor, taking hold of it
+takes it back off the sub-profile. Camera Raw has no channel mixer, so the
+negative's sidecar can't carry it: a negative shot under the leaf opens in
+Lightroom in colour, which is the honest fallback.
 
 ## Exposure
 
@@ -929,7 +992,14 @@ behind it.
 
 **The circle with a diagonal through it**, to the left of the shutter as PS is
 to its right, renders the frame monochrome; switching it on inverts it to a
-white disc with a black cut. The conversion happens at the *end* of the grade
+white disc with a black cut. **It is the one setting that outlives the app**:
+everything else on the sliders goes back to the built-in look on a cold launch,
+but black and white is a way of seeing rather than a correction for a frame,
+and somebody who shoots that way shouldn't have to say so again every morning.
+It is kept in `UserDefaults` wherever it changes — this disc, the panel's
+toggle, a monochrome negative loaded under the sliders, or **Reset**, which
+puts it back to colour along with everything else. Since it counts as a
+departure from the built-in look, **Reset** is red from launch when it is on. The conversion happens at the *end* of the grade
 rather than the start — so the colour mixer still shapes it, the way a
 black-and-white mixer does:
 desaturating a band changes that band's luminance. The negative keeps its
@@ -1196,6 +1266,10 @@ is a screen you are reading, not one you are shooting from. Disarmed, the
 interaction leaves the press alone and the volume goes back to being the
 volume.
 
+**StreetPad keeps them.** It is a screen over the camera, but one to shoot from:
+the keypad is a disguise, and a press on the side of a phone somebody is
+apparently about to call from is the least conspicuous shutter there is.
+
 There is no SwiftUI question for *is a sheet over me*, so that second half is
 the sum of the flags that raise one: a list `CameraView` has to add to when it
 grows a screen. That is the price of buttons that are never deaf and never
@@ -1229,8 +1303,10 @@ What the app was left in the middle of last time has nothing to do with it: a
 negative under the sliders, the favourites open, an exposure pinned five stops
 out, a look three sliders from the one it ships with. So arriving this way puts
 all of it back — capture screen, auto exposure, the wide lens, the built-in
-profile, both exposures at zero — and a camera reached in a hurry is the camera you
-learned rather than the one you left. Opening the app any other way is
+profile, both exposures at zero, StreetPad put away — and a camera reached in a
+hurry is the camera you learned rather than the one you left. The one thing
+that stays is black and white, which survives a relaunch anyway and is not
+something anybody is in the middle of: it is how they shoot. Opening the app any other way is
 untouched: coming back to it is coming back to what you were doing.
 
 An app cannot tell a launch from a resume, so the two entries say which is
@@ -1260,6 +1336,117 @@ nothing else. Everything else in its Info.plist is generated from build
 settings, which can say a string but not an array of dictionaries; a file and
 the generated keys merge into one plist, which is the arrangement the widget's
 own already had.
+
+## StreetPad
+
+A camera that looks like somebody dialling.
+
+Street photography goes wrong the moment the subject sees a camera, and a phone
+held up with a viewfinder on it is a camera. A phone held up with the Phone
+app's keypad on it is somebody about to make a call. So StreetPad covers the
+whole app with a working copy of that keypad — iOS 26's, in its Unified layout
+— and takes photographs from behind it.
+
+**Three taps on the empty space just under the frame's lower right corner**
+open it. Unmarked, since a button labelled *pretend to be the Phone app* would
+give the game away. It answers only over the live camera: a saved frame and the
+develop panel both put a label in that corner, and neither is where a
+photograph is about to be taken from. While neither exposure row is open the
+target reaches down into the room they hold, so it is a corner rather than a
+strip; with one open it keeps to the line under the frame and leaves the row's
+stops alone.
+
+The status bar and the home indicator come back while it is up, because the
+Phone app has both. It is dark, like the rest of Snap — the app is dark-only,
+and the Phone app in dark mode is the Phone app.
+
+### The number is the session
+
+The keys work as keys: each digit lands in the number on touch-down and plays
+the keypad's own tone, which the silent switch silences the way it silences
+the Phone app's. Holding zero types a plus; holding delete deletes on its own,
+one digit and then quickly. And what is dialled is three numbers split by pound
+signs:
+
+| | |
+| --- | --- |
+| **Frames** | how many photographs |
+| **Interval** | seconds from one to the next |
+| **Lead-in** | seconds from the call button to the first |
+
+So `3#10#3` is three frames ten seconds apart, the first one three seconds
+after the call — taken at 3, 13 and 23 seconds. The last two can be left off
+and mean zero: `5` is five frames as fast as the camera can take them, starting
+now. An interval shorter than a capture takes means the next frame waits for
+the last to finish rather than being dropped. Anything else — a star, a plus,
+a fourth field — isn't a session, and the call button says so with a knock.
+
+**The green call button starts it, and pressing it again ends it.** It turns
+red with the handset down while a session runs, the way the button that ends a
+call is. Each frame is taken by the same capture the shutter runs, so it is the
+same look, the same file and the same place in the roll, and each one knocks
+the way the shutter does; the start of a session has a knock of its own, and so
+does the end, however it ended. Auto-lock is held off for the length of a
+session, since a locked phone has no camera.
+
+**The number stays.** Running the same session again is one press, and it is
+kept across closing StreetPad and closing the app. With nothing dialled, the
+call button brings back the last number that started a session, as the Phone
+app brings back the last number called; pressing it again calls it.
+
+### Calls and Contacts hold it level
+
+Calls and Contacts are switches for the level guide, one axis each. A small blue
+dot on the icon carries the axis while it is on:
+
+| | Axis | Holds |
+| --- | --- | --- |
+| **Calls** | Z, straight through the screen | the horizon — turning about it tilts a skyline |
+| **Contacts** | X, across the phone | pointing straight out — turning about it tips the camera up at a building or down at the pavement, and leans its verticals |
+
+During a session, with either on, the phone taps to say how far it is from
+upright. Within a degree it is silent. Past that, both how hard and how often it
+taps grow with the error, from a soft tap every 0.6 seconds just off level to a
+firm one every 0.07 seconds at fifteen degrees and beyond. Silence is what to
+aim for, and a hand can find it without being told which way to go: tilt, and
+the taps say warmer or colder. With both on, the worse of the two is the one it
+reports.
+
+The reading is gravity as Core Motion fuses it from the gyroscope and the
+accelerometer — the gyroscope is what keeps it steady while the phone is being
+carried, where the accelerometer alone would read every step as a tilt. The
+horizon is measured from the nearest quarter turn rather than from portrait
+alone, because the photograph is turned upright by quarter turns when it is
+taken (see [Which way up](#which-way-up)): a phone held level on its side takes
+a level photograph too. A phone lying flat has no horizon to read and is not
+upright either, so it reads as far off. Neither runs outside a session: the
+motion hardware costs power, and a phone tapping in a pocket while nothing is
+being taken is a phone being annoying.
+
+### Search closes it
+
+Search, in its circle at the lower right, closes StreetPad, and a session still
+running ends with it. The app leaving ends one too — the camera stops when it
+goes — but leaves the keypad up, with the number on it, for coming back to.
+
+The volume buttons stay the shutter while it is up (see [The volume
+buttons](#the-volume-buttons)).
+
+### What it can't hide
+
+The shutter sound. Snap has always let AVFoundation play it, and a keypad that
+goes *click* every ten seconds is a keypad somebody will look at. iOS 18 lets an
+app suppress it where local law allows, which StreetPad doesn't yet ask for;
+the silent switch, in the regions where it silences the shutter, is the answer
+for now.
+
+The keypad's measurements are the iOS keypad's, scaled from an iPhone at 393
+points across, and they live together in `PadMetrics` at the foot of
+`StreetPad.swift` so they can be held up against the real thing and nudged. Its
+discs, its tab bar and its search circle are Liquid Glass when Snap is built
+with the iOS 26 SDK and run on iOS 26, which is what the Phone app's keypad has
+worn since 26.1; built with an older SDK, or run on an older system, they are
+the dark grey discs and dark material every keypad before it had.
 
 ## Deliberately not here
 

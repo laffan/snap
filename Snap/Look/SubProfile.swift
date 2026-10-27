@@ -31,6 +31,9 @@ enum SubProfile: String, Codable, CaseIterable, Identifiable {
     case indoor
     /// A dark room, where the shadows are mostly sensor noise.
     case night
+    /// Colour infrared film: foliage turned red and pink, skies deepened, skin
+    /// gone pale — the look of a film that records light the eye can't see.
+    case infrared
 
     var id: String { rawValue }
 
@@ -38,15 +41,19 @@ enum SubProfile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .indoor: return "Indoor"
         case .night:  return "Night"
+        case .infrared: return "Infrared"
         }
     }
 
-    /// A house and a moon, above the shutter and again beside the shutter speed
-    /// of a frame that was taken with one lit.
+    /// A house, a moon and a leaf, above the shutter and again beside the
+    /// shutter speed of a frame that was taken with one lit. The leaf because
+    /// foliage is what infrared film is known for: it reflects the light the
+    /// film sees and the eye doesn't, and comes out glowing.
     var symbol: String {
         switch self {
         case .indoor: return "house"
         case .night:  return "moon"
+        case .infrared: return "leaf"
         }
     }
 
@@ -59,12 +66,14 @@ enum SubProfile: String, Codable, CaseIterable, Identifiable {
         case temperature
         case exposure
         case shadows
+        case infrared
 
         var keyPath: WritableKeyPath<PositiveFilmProfile, Float> {
             switch self {
             case .temperature: return \.temperature
             case .exposure:    return \.exposure
             case .shadows:     return \.shadows
+            case .infrared:    return \.infrared
             }
         }
     }
@@ -85,6 +94,10 @@ enum SubProfile: String, Codable, CaseIterable, Identifiable {
             // what is in the shadows of a dark frame is mostly noise, and the
             // base profile is built to lift it.
             return [.exposure: -0.6, .shadows: -40]
+        case .infrared:
+            // The whole of it. The mapping lives in the grade — see
+            // `PositiveFilmFilter.infrared` — and this is how much of it.
+            return [.infrared: 100]
         }
     }
 

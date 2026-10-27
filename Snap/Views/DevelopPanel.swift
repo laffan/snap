@@ -37,12 +37,12 @@ struct DevelopPanel: View {
         { look.setInteracting($0) }
     }
 
-    /// A binding to one of the three settings a sub-profile is allowed to hold,
+    /// A binding to one of the settings a sub-profile is allowed to hold,
     /// which takes it back off whichever one is holding it as it moves.
     ///
-    /// Indoor sets Temperature and Night sets Exposure and Shadows, and a
-    /// sub-profile sets rather than nudges — so without this, moving one of
-    /// those three sliders with the house or the moon lit changed a number the
+    /// Indoor sets Temperature, Night sets Exposure and Shadows, and Infrared
+    /// sets its own amount, and a sub-profile sets rather than nudges — so
+    /// without this, moving one of those sliders with one lit changed a number the
     /// renderer then overwrote, and the photograph did not move. Every slider
     /// in this panel changes the photograph; that is what a develop panel is.
     private func byHand(_ setting: SubProfile.Setting) -> Binding<Float> {
@@ -172,6 +172,15 @@ struct DevelopPanel: View {
                           labelColor: swatch(primary.hue),
                           onEditingChanged: editing)
             }
+
+            // What the Infrared sub-profile sets. Here because it is the same
+            // kind of thing as the rows above — a remapping of what each
+            // channel records — and by hand, like the other three a
+            // sub-profile holds, so moving it under a lit leaf moves the
+            // photograph.
+            subheading("Infrared")
+            SliderRow(label: "Amount", value: byHand(.infrared),
+                      range: 0...100, onEditingChanged: editing)
         }
     }
 

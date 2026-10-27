@@ -55,6 +55,13 @@ struct CameraView: View {
     /// How far the develop panel has been pulled up over the preview, in
     /// points. The square gives up exactly this much.
     @State private var panelLift: CGFloat = 0
+    /// The Phone app's keypad over the whole screen, taking photographs from
+    /// behind it — see `StreetPad`.
+    @State private var isShowingStreetPad = false
+    /// The run of frames StreetPad's call button starts. Held here rather than
+    /// in the keypad so the app leaving can end it whether or not the keypad
+    /// is up.
+    @StateObject private var streetPad = StreetPadSession()
 
     private var store: ShotStore { camera.store }
 
@@ -107,16 +114,17 @@ struct CameraView: View {
             // Clamped on the way out as well as on the way in, so a width that
             // changed under a lift can't leave the square oversubscribed.
             let lift = isDeveloping ? min(panelLift, liftLimit) : 0
+            let edge = CameraView.viewerEdge(width: width,
+                                             height: geometry.size.height,
+                                             lift: lift,
+                                             isCaptioning: isCaptioning)
 
             VStack(spacing: 0) {
                 // The frame and the two rows that describe it. Drawn over
                 // everything below, so the capture controls slide up behind it
                 // rather than across it when the panel opens.
                 VStack(spacing: 0) {
-                    viewer(edge: CameraView.viewerEdge(width: width,
-                                                       height: geometry.size.height,
-                                                       lift: lift,
-                                                       isCaptioning: isCaptioning))
+                    viewer(edge: edge)
 
                     // Directly under the frame the blue border is around, so
                     // the mode says what it is, which rendering is up and how
@@ -132,6 +140,13 @@ struct CameraView: View {
                     exposureRows
                 }
                 .background(Color.black)
+                // Laid over the block rather than into a row of it, so it can
+                // cover the corner under the frame without moving anything
+                // that is drawn there.
+                .overlay(alignment: .topTrailing) {
+                    streetPadTrigger
+                        .padding(.top, edge)
+                }
                 .zIndex(1)
 
                 // Everything that belongs to taking a photograph rather than
@@ -185,8 +200,17 @@ struct CameraView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(Color.black.ignoresSafeArea())
         }
-        .statusBarHidden()
-        .persistentSystemOverlays(.hidden)
+        // Over everything, sheets aside. The status bar and the home
+        // indicator come back with it: the Phone app has both, and a keypad
+        // without them would look like something pretending to be one.
+        .overlay {
+            if isShowingStreetPad {
+                StreetPad(session: streetPad, camera: camera, onClose: closeStreetPad)
+                    .transition(.opacity)
+            }
+        }
+        .statusBarHidden(!isShowingStreetPad)
+        .persistentSystemOverlays(isShowingStreetPad ? .automatic : .hidden)
         .preferredColorScheme(.dark)
         // Either volume button, on the same shutter the finger has. It lies
         // behind the whole screen and refuses every touch, so where it is put
@@ -227,6 +251,10 @@ struct CameraView: View {
         // session stops, which is what clears the renderer.
         .onReceive(CameraView.didEnterBackground) { _ in
             camera.commitBackgroundSnapshot()
+            // A run can't go on without the camera this is about to stop. The
+            // keypad stays up, so coming back is coming back to it, with the
+            // number still on it.
+            streetPad.stop()
             camera.stop()
         }
         .onReceive(CameraView.didBecomeActive) { _ in
@@ -294,8 +322,14 @@ struct CameraView: View {
     private func viewer(edge: CGFloat) -> some View {
         ZStack {
             if let viewing {
-                ShotView(store: store, shot: viewing, edge: edge, showsRAW: $showsRAW)
-                    .gesture(swipe { step(by: $0) })
+                // The frame and its two neighbours, carried by the finger
+                // rather than swapped at the end of a swipe — see `ShotReel`.
+                ShotReel(store: store,
+                         shot: viewing,
+                         edge: edge,
+                         showsRAW: $showsRAW,
+                         onStep: { step(by: $0) },
+                         onLoupe: enterLoupe)
                     .onTapGesture(count: 2) { toggleFavorite(viewing) }
             } else if let source = camera.versionSource {
                 livePreview
@@ -389,12 +423,18 @@ struct CameraView: View {
         }
     }
 
-    /// A drag on a frame: sideways moves along the roll, down opens the loupe.
+    /// A drag on a negative under the sliders: sideways moves along the roll,
+    /// down opens the loupe. A saved frame in the viewer is carried by
+    /// `ShotReel` instead, which answers the same two directions the same way.
     ///
     /// The roll runs newest to oldest, left to right, so a swipe that carries
     /// the frame leftward moves the way the strip does: to the older one. The
     /// distance is long enough, and the direction has to be decided enough,
     /// that a hold that wandered still peeks rather than turning the page.
+    ///
+    /// This one swaps rather than slides. The negative is drawn into one Metal
+    /// view fed by a development, and its neighbours are negatives nobody has
+    /// developed yet, so there is nothing to lay beside it.
     ///
     /// Down is the direction the roll doesn't use, and the loupe is the thing
     /// that goes under a photograph, so down is what puts one there. Up is left
@@ -838,6 +878,43 @@ struct CameraView: View {
         withAnimation(.easeInOut(duration: 0.22)) { isShowingStrip.toggle() }
     }
 
+    // MARK: - StreetPad
+
+    /// The way into StreetPad: three taps on the empty corner just under the
+    /// frame's lower right, where nothing is drawn while the camera is live.
+    ///
+    /// Only over the live camera. A saved frame puts JPEG in that corner, the
+    /// develop panel puts it there for a negative, and neither is where a
+    /// photograph is about to be taken from.
+    ///
+    /// It reaches down into the room the exposure rows hold open, while
+    /// neither row is in it, so the target is a corner rather than a strip;
+    /// with a row open it keeps to the line under the frame and leaves the
+    /// row's stops alone.
+    @ViewBuilder
+    private var streetPadTrigger: some View {
+        if !isDeveloping, viewing == nil {
+            let rowsOpen = isShowingShutterRow || isShowingISORow
+            Color.clear
+                .frame(width: 120, height: rowsOpen ? 26 : 26 + ValueRowMetrics.height * 2)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 3, perform: openStreetPad)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func openStreetPad() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeOut(duration: 0.2)) { isShowingStreetPad = true }
+    }
+
+    /// Search, at the keypad's lower right. A run that is still going ends
+    /// with it: the keypad is what it was running behind.
+    private func closeStreetPad() {
+        streetPad.stop()
+        withAnimation(.easeOut(duration: 0.2)) { isShowingStreetPad = false }
+    }
+
     /// What the develop panel says about the frame under the sliders. The live
     /// camera has nothing to say there — it isn't a photograph yet, and its
     /// exposure is on the rows above.
@@ -1041,6 +1118,11 @@ struct CameraView: View {
     /// half is the sum of the flags that raise one — a list that has to grow
     /// when a screen does, which is the price of the buttons never being deaf
     /// and never being greedy.
+    ///
+    /// StreetPad is not on the list. It is a screen over the camera, but it is
+    /// one to shoot from rather than one to read: the keypad is a disguise,
+    /// and a press on the side of a phone somebody is apparently about to call
+    /// from is the least conspicuous shutter there is.
     private var isHardwareShutterArmed: Bool {
         viewing == nil
             && !isLoupe
@@ -1258,7 +1340,9 @@ struct CameraView: View {
             isLoupe = false
             isShowingShutterRow = false
             isShowingISORow = false
+            isShowingStreetPad = false
         }
+        streetPad.stop()
 
         isShowingFavorites = false
         isShowingSnapshots = false
@@ -1275,7 +1359,9 @@ struct CameraView: View {
         camera.exposureBias = 0
         camera.releaseFocus()
         camera.selectDefaultLens()
-        camera.look.reset()
+        // Black and white stays: it is a standing choice that survives a
+        // relaunch, and the lock screen's way in is only a hurried one.
+        camera.look.reset(keepingMonochrome: true)
     }
 }
 
@@ -1506,14 +1592,14 @@ private struct ExposureColumn: View {
     }
 }
 
-/// Indoor and Night, above the shutter.
+/// Indoor, Night and Infrared, above the shutter.
 ///
-/// A house and a moon, lit in the one colour this interface has for something
-/// switched on. They lay a few settings over the base look rather than editing
+/// A house, a moon and a leaf, lit in the one colour this interface has for
+/// something switched on. They lay a few settings over the base look rather than editing
 /// it — see `SubProfile` — so the panel's sliders go on showing the base while
 /// one of these is on, and switching it off puts the frame back exactly.
 ///
-/// Watches the look itself, so a toggle redraws two glyphs rather than the
+/// Watches the look itself, so a toggle redraws three glyphs rather than the
 /// whole camera screen.
 private struct SubProfileToggles: View {
 
@@ -1565,6 +1651,205 @@ private struct ExposureControl: View {
     }
 }
 
+/// The saved frame in the viewer, with the frames either side of it laid out
+/// beside it the way they sit along a strip of film.
+///
+/// A swipe used to be a cut: the finger moved, nothing on screen did, and on
+/// lifting the next photograph simply replaced the last. Now the frame is
+/// *held*. It follows the finger one point for one point, the neighbour it is
+/// being pulled towards slides in after it across a thin black gap, and
+/// letting go carries the pair on to the next stop — or back to this one, if
+/// the pull was short and slow. Far enough is a third of the frame; a flick
+/// that is going to carry that far counts as well, so a quick swipe turns the
+/// page without having to be a long one.
+///
+/// At either end of the roll there is nothing to pull in, and the frame gives
+/// a little and comes back rather than sliding off into black — the same stop
+/// the swipe always had, now felt rather than only obeyed.
+///
+/// The neighbours are real frames, loaded as soon as they are laid out, so the
+/// one that arrives is already the photograph rather than a square waiting to
+/// become one. Only the frame in the middle develops its negative for the
+/// peek: that is the expensive half, and a neighbour never needs it until it
+/// is the one in the middle.
+private struct ShotReel: View {
+
+    @ObservedObject var store: ShotStore
+    let shot: Shot
+    let edge: CGFloat
+    @Binding var showsRAW: Bool
+    /// Called once the frame has come to rest at its new stop, with the same
+    /// step a swipe has always made: +1 for the older frame, −1 the newer.
+    var onStep: (Int) -> Void
+    var onLoupe: () -> Void
+
+    /// How far the reel has been pulled off its stop.
+    @State private var offset: CGFloat = 0
+    /// Which way this drag decided to go on its first move. Decided once, so a
+    /// drag that starts sideways never becomes a loupe on the way, and one
+    /// that starts down never drags the frame along.
+    @State private var axis: Axis? = nil
+    /// Where the drag was when it was decided. Taken off what follows, so the
+    /// frame starts from where it is rather than jumping the recogniser's
+    /// minimum distance in one go.
+    @State private var grabbedAt: CGFloat = 0
+    /// True while the reel is carrying a frame on to its next stop, during
+    /// which a new drag has nothing to take hold of.
+    @State private var isTurning = false
+    @GestureState private var isDragging = false
+
+    /// The black between two frames, which is what makes them read as two
+    /// frames on one strip rather than one wide picture.
+    private static let gap: CGFloat = 10
+
+    /// From one stop to the next.
+    private var pitch: CGFloat { edge + ShotReel.gap }
+
+    private struct Frame: Identifiable {
+        let shot: Shot
+        /// −1 the newer frame at the left, 0 this one, +1 the older at the
+        /// right — the way the strip under it runs.
+        let position: Int
+        var id: UUID { shot.id }
+    }
+
+    /// This frame and whichever neighbours it has. The one in the middle is
+    /// the viewer's own copy rather than the roll's, as it always was.
+    private var frames: [Frame] {
+        let shots = store.shots
+        guard let index = shots.firstIndex(where: { $0.id == shot.id }) else {
+            return [Frame(shot: shot, position: 0)]
+        }
+        return (-1...1).compactMap { position -> Frame? in
+            if position == 0 { return Frame(shot: shot, position: 0) }
+            guard shots.indices.contains(index + position) else { return nil }
+            return Frame(shot: shots[index + position], position: position)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            // Keyed by the frame rather than by the slot, so the neighbour
+            // that arrives is the same view that was sliding in — already
+            // loaded — rather than a fresh one starting from black.
+            ForEach(frames) { frame in
+                let isCurrent = frame.position == 0
+
+                ShotView(store: store,
+                         shot: frame.shot,
+                         edge: edge,
+                         showsRAW: isCurrent ? $showsRAW : .constant(false),
+                         isCurrent: isCurrent)
+                    .frame(width: edge, height: edge)
+                    .clipped()
+                    .offset(x: CGFloat(frame.position) * pitch + offset)
+                    // Only the frame in the middle can be held to peek.
+                    .allowsHitTesting(isCurrent)
+            }
+        }
+        .frame(width: edge, height: edge)
+        .contentShape(Rectangle())
+        .gesture(drag)
+        // A drag the system took back never reaches `onEnded`. Whatever it
+        // left the reel holding is put down here instead.
+        .onChange(of: isDragging) { _, dragging in
+            guard !dragging else { return }
+            axis = nil
+            if !isTurning, offset != 0 { settle(velocity: 0) }
+        }
+    }
+
+    /// Sideways carries the reel, down opens the loupe — the same two
+    /// directions, and the same distances, the swipe always had.
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .local)
+            .updating($isDragging) { _, dragging, _ in dragging = true }
+            .onChanged { value in
+                guard !isTurning else { return }
+                let translation = value.translation
+                if axis == nil {
+                    axis = abs(translation.width) > abs(translation.height) ? .horizontal : .vertical
+                    grabbedAt = translation.width
+                }
+                guard axis == .horizontal else { return }
+                offset = resisted(translation.width - grabbedAt)
+            }
+            .onEnded { value in
+                let decided = axis
+                axis = nil
+                guard !isTurning else { return }
+
+                guard decided == .horizontal else {
+                    if value.translation.height > 44 { onLoupe() }
+                    return
+                }
+
+                let travel = value.translation.width - grabbedAt
+                let flung = value.predictedEndTranslation.width - grabbedAt
+                // Leftward carries the frame towards the older one, as the
+                // strip runs.
+                let direction = travel < 0 ? 1 : -1
+                let isFarEnough = abs(travel) > edge / 3
+                let isFlung = abs(flung) > edge * 0.6
+                    && (flung < 0) == (travel < 0)
+                    && abs(travel) > 24
+
+                if (isFarEnough || isFlung), hasNeighbour(direction) {
+                    turn(direction, velocity: value.velocity.width)
+                } else {
+                    settle(velocity: value.velocity.width)
+                }
+            }
+    }
+
+    private func hasNeighbour(_ direction: Int) -> Bool {
+        frames.contains { $0.position == direction }
+    }
+
+    /// One for one towards a frame that is there; a quarter as far towards
+    /// the end of the roll, so the stop is felt rather than hit.
+    private func resisted(_ travel: CGFloat) -> CGFloat {
+        hasNeighbour(travel < 0 ? 1 : -1) ? travel : travel * 0.25
+    }
+
+    /// Carries the reel on to the next stop at the speed the finger let go of
+    /// it, and only then tells the viewer which frame is up. The swap happens
+    /// with nothing moving, so it can't be seen: the neighbour is already
+    /// exactly where the frame in the middle is drawn.
+    private func turn(_ direction: Int, velocity: CGFloat) {
+        let target = -CGFloat(direction) * pitch
+        isTurning = true
+        withAnimation(carry(from: offset, to: target, velocity: velocity)) {
+            offset = target
+        } completion: {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                onStep(direction)
+                offset = 0
+            }
+            isTurning = false
+        }
+    }
+
+    private func settle(velocity: CGFloat) {
+        withAnimation(carry(from: offset, to: 0, velocity: velocity)) {
+            offset = 0
+        }
+    }
+
+    /// A spring that starts at the speed the finger was moving, so a flick
+    /// carries on as a flick and a slow pull arrives slowly. SwiftUI takes the
+    /// velocity as a fraction of the distance left to travel.
+    private func carry(from start: CGFloat, to end: CGFloat, velocity: CGFloat) -> Animation {
+        let distance = end - start
+        let relative = abs(distance) > 1 ? velocity / distance : 0
+        return .interpolatingSpring(duration: 0.34,
+                                    bounce: 0,
+                                    initialVelocity: Double(min(max(relative, 0), 12)))
+    }
+}
+
 /// A saved frame shown in the viewer area.
 ///
 /// Holding on it swaps to the negative — same square, no look — so the two can
@@ -1575,17 +1860,25 @@ private struct ShotView: View {
     let shot: Shot
     let edge: CGFloat
     @Binding var showsRAW: Bool
+    /// False for a neighbour lying beside the frame in the reel, which shows
+    /// its JPEG and leaves its negative alone until it is the one in the
+    /// middle.
+    var isCurrent = true
 
     @State private var jpeg: UIImage? = nil
     @State private var raw: UIImage? = nil
+    /// Which frame `raw` was developed for. The view can be handed another
+    /// frame, and a negative from the last one is not a peek at this one.
+    @State private var rawID: UUID? = nil
 
     private var hasRAW: Bool { store.rawURL(for: shot) != nil }
+    private var isRAWReady: Bool { rawID == shot.id && raw != nil }
 
     var body: some View {
         ZStack {
             Color.black
 
-            if let image = (showsRAW ? raw : jpeg) ?? jpeg {
+            if let image = (showsRAW && isRAWReady ? raw : jpeg) ?? jpeg {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -1595,30 +1888,37 @@ private struct ShotView: View {
         .onLongPressGesture(minimumDuration: 0.25, pressing: { pressing in
             if !pressing { showsRAW = false }
         }, perform: {
-            guard hasRAW, raw != nil else { return }
+            guard hasRAW, isRAWReady else { return }
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             showsRAW = true
         })
         .task(id: shot.id) {
-            showsRAW = false
+            if isCurrent { showsRAW = false }
             let pixels = edge * 3
 
             let jpegURL = store.imageURL(for: shot)
             jpeg = await Task.detached(priority: .userInitiated) {
                 ShotStore.image(at: jpegURL, maxPixelSize: pixels)
             }.value
-
-            // Developed up front, not on the gesture — demosaicing takes long
-            // enough that peeking would otherwise stutter.
-            raw = nil
-            guard let rawURL = store.rawURL(for: shot) else { return }
+        }
+        // Developed up front, not on the gesture — demosaicing takes long
+        // enough that peeking would otherwise stutter. Keyed to whether this
+        // is the frame in the middle, so a neighbour that slides in starts
+        // developing the moment it arrives, and only then.
+        .task(id: isCurrent ? shot.id : nil) {
+            guard isCurrent, rawID != shot.id,
+                  let rawURL = store.rawURL(for: shot) else { return }
+            let pixels = edge * 3
             let profile = shot.profile
-            raw = await Task.detached(priority: .utility) {
+            let id = shot.id
+            let developed = await Task.detached(priority: .utility) {
                 RAWDeveloper.previewImage(at: rawURL,
                                           profile: profile,
                                           maxPixelSize: pixels,
                                           context: CIContext(options: [.cacheIntermediates: false]))
             }.value
+            raw = developed
+            rawID = id
         }
     }
 }
