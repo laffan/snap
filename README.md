@@ -1213,6 +1213,18 @@ annotates it *"shift toward aqua/blue"*, and in Lightroom a negative green hue
 moves toward yellow. The teal-shifted foliage is the defining half of this
 look, so the stated intent wins. See the comment in `PositiveFilmProfile.swift`.
 
+## No shutter sound
+
+Snap takes photographs silently, everywhere iOS lets it — which, since iOS 18,
+is everywhere except the places whose law requires the sound. The shutter
+already knocks and the frame already blinks, which is two ways of telling the
+one person who needs telling; the sound tells everybody else, and a camera
+that announces itself to a whole street is the opposite of what StreetPad is
+for. `AVCapturePhotoOutput.isShutterSoundSuppressionSupported` says whether
+this is one of those places, and where it is false the sound plays as before:
+asking anyway would throw. Before iOS 18 there is no asking, and the sound
+plays.
+
 ## The volume buttons
 
 Either volume button is the shutter. Pressing one takes exactly the photograph
@@ -1384,10 +1396,37 @@ a fourth field — isn't a session, and the call button says so with a knock.
 **The green call button starts it, and pressing it again ends it.** It turns
 red with the handset down while a session runs, the way the button that ends a
 call is. Each frame is taken by the same capture the shutter runs, so it is the
-same look, the same file and the same place in the roll, and each one knocks
-the way the shutter does; the start of a session has a knock of its own, and so
-does the end, however it ended. Auto-lock is held off for the length of a
-session, since a locked phone has no camera.
+same look, the same file and the same place in the roll. Auto-lock is held off
+for the length of a session, since a locked phone has no camera.
+
+### It talks in the earpiece
+
+A session says what it is doing in sound, quietly, through the earpiece — the
+speaker at the top of the phone, which a phone held as if for a call has
+nearest the ear, and which is quiet enough that nobody else hears it. With
+headphones in, it goes to them instead.
+
+| | |
+| --- | --- |
+| **Tick** | a dry click for each second of the lead-in, starting at the press of the call button |
+| **Beep** | a short, soft E6 as each frame is taken |
+| **Pips** | the level guide, below |
+
+The tones are made in code — a few hundred milliseconds of sine wave each, eased
+in and out so they don't click, the tick struck and left to die away so it
+does — and played at a fraction of full volume on top of a speaker that is
+already quiet. Set the volume before opening StreetPad: while it is up the
+volume buttons are the shutter, so they can't turn it up.
+
+It was haptics before, and haptics turned out not to come through on every
+phone while the camera is running. The knocks are still tried alongside — a
+start, each frame, an end — for the phones that deliver them.
+
+The earpiece can only be reached from an audio session that is able to record,
+so for the length of a session the app's audio session is *play and record*.
+Nothing is recorded and no input is ever opened, but iOS may ask once for the
+microphone because of it, and the reason Snap gives says exactly that. Other
+audio keeps playing alongside.
 
 **The number stays.** Running the same session again is one press, and it is
 kept across closing StreetPad and closing the app. With nothing dialled, the
@@ -1404,13 +1443,21 @@ dot on the icon carries the axis while it is on:
 | **Calls** | Z, straight through the screen | the horizon — turning about it tilts a skyline |
 | **Contacts** | X, across the phone | pointing straight out — turning about it tips the camera up at a building or down at the pavement, and leans its verticals |
 
-During a session, with either on, the phone taps to say how far it is from
-upright. Within a degree it is silent. Past that, both how hard and how often it
-taps grow with the error, from a soft tap every 0.6 seconds just off level to a
-firm one every 0.07 seconds at fifteen degrees and beyond. Silence is what to
-aim for, and a hand can find it without being told which way to go: tilt, and
-the taps say warmer or colder. With both on, the worse of the two is the one it
-reports.
+During a session, with either on, the earpiece pips to say how far the phone
+is from upright, and which way. Within a degree it is silent. Past that it pips
+faster the further off it is, from once every 0.6 seconds just off level to
+every 0.07 seconds at fifteen degrees and beyond. The pip itself says which
+axis and which side:
+
+| | High | Low |
+| --- | --- | --- |
+| **One pip** — the horizon | leaning right | leaning left |
+| **Two pips** — pointing | pointing up | pointing down |
+
+So a fast, low single pip is a phone leaning well over to the left. With both
+on, it reports whichever is further off. Silence is what to aim for: tilt
+against the pitch and the pips slow down and stop. Each pip is also a tap, as
+hard as the pip is fast, for phones whose haptics come through.
 
 The reading is gravity as Core Motion fuses it from the gyroscope and the
 accelerometer — the gyroscope is what keeps it steady while the phone is being
@@ -1418,9 +1465,10 @@ carried, where the accelerometer alone would read every step as a tilt. The
 horizon is measured from the nearest quarter turn rather than from portrait
 alone, because the photograph is turned upright by quarter turns when it is
 taken (see [Which way up](#which-way-up)): a phone held level on its side takes
-a level photograph too. A phone lying flat has no horizon to read and is not
-upright either, so it reads as far off. Neither runs outside a session: the
-motion hardware costs power, and a phone tapping in a pocket while nothing is
+a level photograph too. A phone lying flat has no horizon to read, so with
+only the horizon on it says what is actually wrong instead — which way the
+phone is facing — in pointing's two pips. Neither runs outside a session: the
+motion hardware costs power, and a phone pipping in a pocket while nothing is
 being taken is a phone being annoying.
 
 ### Search closes it
@@ -1432,13 +1480,7 @@ goes — but leaves the keypad up, with the number on it, for coming back to.
 The volume buttons stay the shutter while it is up (see [The volume
 buttons](#the-volume-buttons)).
 
-### What it can't hide
-
-The shutter sound. Snap has always let AVFoundation play it, and a keypad that
-goes *click* every ten seconds is a keypad somebody will look at. iOS 18 lets an
-app suppress it where local law allows, which StreetPad doesn't yet ask for;
-the silent switch, in the regions where it silences the shutter, is the answer
-for now.
+### The keypad itself
 
 The keypad's measurements are the iOS keypad's, scaled from an iPhone at 393
 points across, and they live together in `PadMetrics` at the foot of

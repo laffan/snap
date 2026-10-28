@@ -901,15 +901,28 @@ final class CameraModel: NSObject, ObservableObject {
     /// capture is the negative, and the JPEG is something Snap derives from it
     /// afterwards. The processed path below is only for cameras that can't
     /// deliver Bayer RAW.
+    ///
+    /// Either way, without the shutter sound wherever iOS allows it. The
+    /// shutter already knocks and the frame already blinks, which is two ways
+    /// of saying a photograph was taken to the one person who needs telling;
+    /// the sound says it to everybody else, and StreetPad exists so that
+    /// nobody else is told. In the places where the law requires the sound,
+    /// `isShutterSoundSuppressionSupported` is false and it plays as before —
+    /// asking regardless would throw.
     private func makeSettings() -> AVCapturePhotoSettings {
+        let settings: AVCapturePhotoSettings
         if let rawPixelFormat {
-            return AVCapturePhotoSettings(rawPixelFormatType: rawPixelFormat,
-                                          processedFormat: nil)
+            settings = AVCapturePhotoSettings(rawPixelFormatType: rawPixelFormat,
+                                              processedFormat: nil)
+        } else {
+            settings = AVCapturePhotoSettings()
+            settings.photoQualityPrioritization = .quality
+            settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
         }
 
-        let settings = AVCapturePhotoSettings()
-        settings.photoQualityPrioritization = .quality
-        settings.maxPhotoDimensions = photoOutput.maxPhotoDimensions
+        if #available(iOS 18.0, *), photoOutput.isShutterSoundSuppressionSupported {
+            settings.isShutterSoundSuppressionEnabled = true
+        }
         return settings
     }
 

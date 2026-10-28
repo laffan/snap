@@ -12,10 +12,11 @@
 //  run again is one press.
 //
 //  Nothing here looks at the screen, because the point is that nobody is.
-//  Every frame says itself with the shutter's own knock, the start and the end
-//  of a run each have a knock of their own, and the level guide — when Calls
-//  or Contacts has switched an axis of it on — says how far the phone is from
-//  upright by how hard and how often it taps.
+//  Everything is said through the earpiece instead — see `StreetPadSounds`:
+//  a tick for each second of the lead-in, a soft beep as each frame is taken,
+//  and the level guide's pips when Calls or Contacts has switched an axis of
+//  it on. The knocks the run has always had are still tried alongside, for
+//  the phones that deliver them.
 //
 
 import Combine
@@ -91,7 +92,8 @@ final class StreetPadSession: ObservableObject {
     }
 
     private var run: Task<Void, Never>? = nil
-    private let level = LevelGuide()
+    private let sounds = StreetPadSounds()
+    private lazy var level = LevelGuide(sounds: sounds)
 
     /// Starts a run. The camera takes each frame exactly as its own shutter
     /// would — same look, same file, same place in the roll.
@@ -101,12 +103,26 @@ final class StreetPadSession: ObservableObject {
         isRunning = true
         // A run can be longer than auto-lock, and a locked phone has no camera.
         UIApplication.shared.isIdleTimerDisabled = true
+        sounds.activate()
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         updateLevelGuide()
 
+        let sounds = self.sounds
         run = Task { [weak self] in
             let clock = ContinuousClock()
             let start = clock.now
+
+            // The lead-in counted out a second at a time, from the press of
+            // the call button up to the first frame — so the first tick is
+            // also the one that says the run has started.
+            for second in 0..<plan.leadIn {
+                do {
+                    try await clock.sleep(until: start + .seconds(second), tolerance: nil)
+                } catch {
+                    return
+                }
+                sounds.play(.tick)
+            }
 
             for index in 0..<plan.frames {
                 do {
@@ -122,6 +138,9 @@ final class StreetPadSession: ObservableObject {
                     return
                 }
                 camera.capture()
+                // Quiet, short, and the only sign there is now that the
+                // shutter makes no sound of its own.
+                sounds.play(.shutter)
             }
 
             self?.finish()
@@ -150,6 +169,7 @@ final class StreetPadSession: ObservableObject {
         isRunning = false
         UIApplication.shared.isIdleTimerDisabled = false
         updateLevelGuide()
+        sounds.deactivate()
         if knock { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
     }
 
@@ -167,32 +187,41 @@ final class StreetPadSession: ObservableObject {
     }
 }
 
-/// Says how far the phone is from upright, by touch.
+/// Says how far the phone is from upright, by ear and by touch.
 ///
 /// Read off gravity as Core Motion fuses it from the gyroscope and the
 /// accelerometer — the gyroscope is what keeps the reading steady while the
 /// phone is being carried, where the accelerometer alone would read every step
 /// as a tilt.
 ///
-/// Within a degree of level it is silent. Past that it taps, and both how hard
-/// and how often grow with the error: a slow, soft tap a little off, a fast,
-/// firm one far off, saturating at fifteen degrees. Silence is the answer to
-/// aim for, which is the one a hand can find without being told which way to
-/// go — tilt, and the taps say warmer or colder.
+/// Within a degree of level it is silent. Past that it pips in the earpiece,
+/// faster the further off it is: a pip every 0.6 seconds a little off, every
+/// 0.07 at fifteen degrees and beyond. The pip says which way, too. One pip is
+/// the horizon and two are pointing; high is leaning right or pointing up, low
+/// is leaning left or pointing down. With both axes on it reports whichever is
+/// further off. Silence is the answer to aim for.
+///
+/// Each pip is also a tap, as hard as the pip is fast, for the phones whose
+/// haptics come through while the camera is running.
 @MainActor
 final class LevelGuide {
 
     var tracksHorizon = false
     var tracksPitch = false
 
-    /// Within this, in degrees, the phone is level and nothing taps.
+    /// Within this, in degrees, the phone is level and nothing sounds.
     static let tolerance = 1.0
-    /// Past this, in degrees, the taps are as hard and as fast as they get.
+    /// Past this, in degrees, the pips are as fast as they get.
     static let saturation = 15.0
 
+    private let sounds: StreetPadSounds
     private let motion = CMMotionManager()
     private let haptic = UIImpactFeedbackGenerator(style: .rigid)
     private var lastPulse: CFTimeInterval = 0
+
+    init(sounds: StreetPadSounds) {
+        self.sounds = sounds
+    }
 
     func start() {
         guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
@@ -210,42 +239,73 @@ final class LevelGuide {
     }
 
     private func respond(to gravity: CMAcceleration) {
-        var error = 0.0
-        if tracksHorizon { error = max(error, LevelGuide.horizonError(gravity)) }
-        if tracksPitch { error = max(error, LevelGuide.pitchError(gravity)) }
-        guard error > LevelGuide.tolerance else { return }
+        // The axis furthest off, and which side of level it is on.
+        var worst: (error: Double, isPointing: Bool) = (0, false)
+        if tracksHorizon {
+            if let error = LevelGuide.horizonError(gravity) {
+                if abs(error) > abs(worst.error) { worst = (error, false) }
+            } else {
+                // Lying flat there is no horizon to read, and what is wrong
+                // is which way the phone faces — so that is what is said.
+                worst = (LevelGuide.pitchError(gravity), true)
+            }
+        }
+        if tracksPitch {
+            let error = LevelGuide.pitchError(gravity)
+            if abs(error) > abs(worst.error) { worst = (error, true) }
+        }
 
-        let t = min((error - LevelGuide.tolerance) / (LevelGuide.saturation - LevelGuide.tolerance), 1)
-        // From a tap every 0.6 s just off level to one every 0.07 s far off.
-        let interval = 0.6 + (0.07 - 0.6) * t
+        let magnitude = abs(worst.error)
+        guard magnitude > LevelGuide.tolerance else { return }
+
+        let t = min((magnitude - LevelGuide.tolerance) / (LevelGuide.saturation - LevelGuide.tolerance), 1)
+        // From a pip every 0.6 s just off level to one every 0.07 s far off.
+        // Two pips need a little longer to be two.
+        let fastest = worst.isPointing ? 0.14 : 0.07
+        let interval = 0.6 + (fastest - 0.6) * t
         let now = CACurrentMediaTime()
         guard now - lastPulse >= interval else { return }
-
         lastPulse = now
+
+        let isHigh = worst.error > 0
+        switch (worst.isPointing, isHigh) {
+        case (false, true):  sounds.play(.horizonHigh)
+        case (false, false): sounds.play(.horizonLow)
+        case (true, true):   sounds.play(.pointingHigh)
+        case (true, false):  sounds.play(.pointingLow)
+        }
         haptic.impactOccurred(intensity: CGFloat(0.35 + 0.65 * t))
         haptic.prepare()
     }
 
     /// How far, in degrees, the screen's own up has turned away from the
-    /// nearest quarter turn of true up.
+    /// nearest quarter turn of true up: positive leaning right — turned
+    /// clockwise, as the person holding it sees the screen — and negative
+    /// leaning left.
     ///
     /// The nearest quarter turn rather than portrait alone, because the photo
     /// is turned upright by quarter turns when it is taken — see "Which way
     /// up" in the README — so a phone held level on its side takes a level
     /// photograph too.
-    static func horizonError(_ gravity: CMAcceleration) -> Double {
-        // Lying flat, which way is down within the screen is noise rather
-        // than a reading, and a phone lying flat is not upright either.
+    ///
+    /// Nil with the phone lying flat, or near it, where which way is down
+    /// within the screen is noise rather than a reading.
+    static func horizonError(_ gravity: CMAcceleration) -> Double? {
         let inPlane = (gravity.x * gravity.x + gravity.y * gravity.y).squareRoot()
-        guard inPlane > 0.25 else { return saturation }
+        guard inPlane > 0.25 else { return nil }
 
         let angle = atan2(gravity.x, -gravity.y) * 180 / .pi
-        return abs(angle - 90 * (angle / 90).rounded())
+        return angle - 90 * (angle / 90).rounded()
     }
 
-    /// How far, in degrees, the screen has tipped away from vertical — the
-    /// camera pointing up or down rather than straight out.
+    /// How far, in degrees, the screen has tipped away from vertical:
+    /// positive with the camera pointing up, negative pointing down.
+    ///
+    /// The screen faces the person holding it and the camera faces away, so
+    /// the camera pointing up is the screen tipping forward towards the
+    /// ground, which is gravity pulling out through the screen — the
+    /// direction Core Motion's z runs.
     static func pitchError(_ gravity: CMAcceleration) -> Double {
-        abs(asin(min(max(gravity.z, -1), 1))) * 180 / .pi
+        asin(min(max(gravity.z, -1), 1)) * 180 / .pi
     }
 }
