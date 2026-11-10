@@ -206,7 +206,7 @@ the screen was.
 
 Below the frame sit the exposure column at the left, then black-and-white, the
 shutter and **PS** across the middle, the two round buttons equally far from
-their own edge of the screen. The exposure compensation stepper sits at the right.
+their own edge of the screen. The exposure compensation wheel sits at the right.
 Under the shutter is a row of dots, one per lens, widening left to right
 the way the lenses do and filled for the one in use. The exposure controls stand
 in a column rather than a row to leave the middle of that row to the buttons.
@@ -229,13 +229,18 @@ things deliberately not here, and it would have to follow the frame into its
 negative, its DNG crop and its sidecar. The full ultra-wide square is what you
 get, and at that distance the subject fills it anyway.
 
-**The stepper is the camera's exposure compensation**, in thirds of a stop
-across ±3, the way a camera's dial moves. It tells the meter where to aim
-rather than darkening the picture afterwards: a third of a stop under and the
-sensor takes in a third of a stop less light, in auto and in either priority
-alike, since both steer by the meter. Holding the number between the two steps
-for half a second clears it back to zero. Apple records it in the frame's EXIF
-as `ExposureBiasValue`.
+**The wheel is the camera's exposure compensation**, in thirds of a stop
+across ±3, the way a camera's dial moves. It is drawn as the side of a dial
+whose centre is just past the right edge of the screen: a slice of rim, a tick
+per third, the whole stops numbered on it, and a fixed pointer at its middle
+with the exact setting beside it. Dragging up or down turns it — up is more
+light — clicking at each third, and it settles on the nearest one when you let
+go. The pointer goes yellow while it is anything but zero. Double-tapping it
+puts it back to zero, as double-tapping does for a slider. It tells the meter
+where to aim rather than darkening the picture afterwards: a third of a stop
+under and the sensor takes in a third of a stop less light, in auto and in
+either priority alike, since both steer by the meter. Apple records it in the
+frame's EXIF as `ExposureBiasValue`.
 
 It used to be the panel's Exposure slider reached a quicker way, and that is
 what made it useless at the one thing compensation is for. Point the camera at
@@ -286,7 +291,7 @@ with a photograph you have just looked at and made your mind up about. Both are
 also in the long-press menu on its thumbnail, along with Share RAW, which is the
 one that needs a menu.
 
-The camera controls go with the exposure stepper while a saved frame is up:
+The camera controls go with the exposure wheel while a saved frame is up:
 lens, mode and black-and-white all decide how the *next* photograph is taken,
 and none of them applies to one that already exists. Long-press for **Add to
 Favorites**, **Use Develop Settings** (puts that shot's settings back on the
@@ -421,7 +426,15 @@ The bar and the roll are attached. Tapping **Develop** lifts the pair to just
 under the frame and fills in the sliders beneath them, while everything to do
 with taking a photograph — the shutter, the modes, the lens dots, the caption —
 leaves upward and slides in behind the frame. Tapping it again puts it all back:
-it is one switch, in one place, and it reads as lit while the sliders are open.
+it is one switch, in one place, and it reads as lit while the sliders are open —
+underlined, with a down chevron beside it for the way the panel goes when it is
+pressed again.
+
+**Develop turns red whenever the look is not the one the app ships with**, on
+the camera screen as well as in the panel. It makes the same test Reset does,
+so the two always agree — but Reset is only on the bar while the panel is open,
+and this is what says so before a photograph is taken in a look nobody
+remembered leaving on.
 
 There was a **Done** beside Reset that did exactly that, which made one switch
 look like two — and between a word that appears at the far end of the bar only
@@ -637,7 +650,9 @@ rather than to one frame: **Select** turns the wall into checkboxes, with export
 and delete for whatever you tick; **Export All** hands the lot to the share
 sheet; **Clear** empties it, after asking.
 
-They live in `Documents/Snapshots`, one JPEG each, apart from the roll and never
+They live in `Documents/Snapshots`, one JPEG each, named for the moment they were
+left — `2026-11-10_14-03-22_<UUID>.jpg`, local time, so that a batch shared out
+of the app arrives sorted — apart from the roll and never
 written to the camera roll: these are not photographs anybody took, and they
 shouldn't turn up in a year's worth of ones that were. They carry their look in
 EXIF like everything else the app writes, since they were graded on the way to
@@ -731,7 +746,7 @@ rest of what it sets carries on as before. Every slider in the panel changes the
 photograph, whatever is lit above the shutter. It is the same for the other way
 Exposure is reached, the tap on the EV readout, since it is the same setting and
 a control that reported a value rather than making one would be no better
-there. (The stepper beside the frame is the camera's compensation rather than
+there. (The wheel beside the frame is the camera's compensation rather than
 this setting, so Night has nothing of its to hold.)
 
 **Switching a sub-profile off and on again hands it back.** A toggle has to mean
@@ -905,7 +920,9 @@ bright are separate decisions, and the exposure controls own the second.
 
 A rule-of-thirds guide sits over the live preview. Holding anywhere on it for
 a second pins focus to that point and marks it with a yellow ring; any tap lets
-it go again. Switching lens releases the point too, since it
+it go again. What is pinned is the point on the screen rather than the distance
+it was at: the camera goes on autofocusing on whatever is under the ring as the
+frame moves, rather than focusing once and holding that distance. Switching lens releases the point too, since it
 means nothing on another lens.
 
 A monochrome frame stays monochrome. Loading one for re-developing switches

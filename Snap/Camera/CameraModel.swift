@@ -139,7 +139,7 @@ final class CameraModel: NSObject, ObservableObject {
         didSet { if !isAdjustingExposure { applyExposure() } }
     }
 
-    /// Exposure compensation at the sensor, in stops — the stepper beside the
+    /// Exposure compensation at the sensor, in stops — the wheel beside the
     /// shutter.
     ///
     /// It moves the meter's target rather than the picture: told to sit a stop
@@ -918,6 +918,13 @@ final class CameraModel: NSObject, ObservableObject {
     /// Pins focus to a point, given in the displayed square's own normalised
     /// coordinates: x right, y down, 0...1.
     ///
+    /// What is pinned is the point on the screen, not the distance it was at.
+    /// This used to be `.autoFocus`, which focuses once and then holds that
+    /// distance — so moving the camera left the ring over something that had
+    /// gone soft. Continuous autofocus with the point of interest set keeps
+    /// refocusing on whatever is under the ring as the frame moves. Single-shot
+    /// is the fallback for a device that can't do continuous.
+    ///
     /// Focus only. Metering is left where it is, so choosing what is sharp
     /// doesn't also decide what is bright — those are separate decisions and
     /// the exposure controls own the second one.
@@ -929,9 +936,15 @@ final class CameraModel: NSObject, ObservableObject {
             guard let device = self?.videoDevice else { return }
             do {
                 try device.lockForConfiguration()
-                if device.isFocusPointOfInterestSupported, device.isFocusModeSupported(.autoFocus) {
+                if device.isFocusPointOfInterestSupported {
+                    // The point is only read when the mode is set, so the
+                    // mode goes after it.
                     device.focusPointOfInterest = target
-                    device.focusMode = .autoFocus
+                    if device.isFocusModeSupported(.continuousAutoFocus) {
+                        device.focusMode = .continuousAutoFocus
+                    } else if device.isFocusModeSupported(.autoFocus) {
+                        device.focusMode = .autoFocus
+                    }
                 }
                 device.unlockForConfiguration()
             } catch {

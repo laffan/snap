@@ -25,9 +25,9 @@ struct ActionBar: View {
     /// For the starburst, which lights only when the app has left something
     /// behind.
     @ObservedObject var snapshots: SnapshotStore
-    /// Handed to Reset rather than watched here: the look changes on every
-    /// frame of a slider drag, and only the one button that has anything to say
-    /// about it redraws at that rate.
+    /// Handed to Develop and Reset rather than watched here: the look changes
+    /// on every frame of a slider drag, and only the two words that have
+    /// anything to say about it redraw at that rate.
     let look: LookModel
 
     var isDeveloping: Bool
@@ -91,12 +91,11 @@ struct ActionBar: View {
     /// It is the only way out of the panel, too. There was a Done beside Reset
     /// that did exactly this, which made one switch look like two — and the one
     /// that stays in the same place whichever screen you are on is the one
-    /// worth keeping.
+    /// worth keeping. While the panel is open it is underlined, with a down
+    /// chevron beside it, which is the way the panel goes when it is pressed.
     private var develop: some View {
         Button(action: onToggleDevelop) {
-            Text("Develop")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(isDeveloping ? 1 : 0.75))
+            DevelopLabel(look: look, isDeveloping: isDeveloping)
                 .padding(.vertical, 8)
                 // Ten here and ten inside each of the two round targets beside
                 // it puts an even gap between all three.
@@ -108,6 +107,7 @@ struct ActionBar: View {
         .opacity(canDevelop ? 1 : 0.35)
         .accessibilityLabel("Develop")
         .accessibilityValue(isDeveloping ? "on" : "off")
+        .accessibilityHint(isDeveloping ? "Closes the develop panel" : "Opens the develop panel")
     }
 
     /// The way into the frames the app left behind while it was away.
@@ -165,6 +165,43 @@ struct ActionBar: View {
             .accessibilityLabel("Show the roll")
             .accessibilityValue(isStripVisible ? "on" : "off")
             .accessibilityAction(named: "Browse the roll", onBrowseRoll)
+    }
+}
+
+// MARK: - Develop
+
+/// The word on the switch the panel hangs off.
+///
+/// Red, the colour Reset turns, whenever the look is anything but the one the
+/// app ships with — the same test Reset makes, so the two always agree. Reset
+/// is only on the bar while the panel is open; this is the one that says so
+/// from the camera screen, before the photograph is taken in a look nobody
+/// remembered leaving on.
+///
+/// Watches the look itself, for the same reason Reset does.
+private struct DevelopLabel: View {
+
+    @ObservedObject var look: LookModel
+    var isDeveloping: Bool
+
+    private var isChanged: Bool { look.profile != PositiveFilmProfile() }
+
+    var body: some View {
+        Text("Develop")
+            .font(.system(size: 13, weight: .semibold))
+            .underline(isDeveloping)
+            // Hung off the word rather than laid beside it, in the gap before
+            // the heart, so opening the panel doesn't push the heart along.
+            .overlay(alignment: .trailing) {
+                if isDeveloping {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .alignmentGuide(.trailing) { $0[.leading] - 3 }
+                        .transition(.opacity)
+                }
+            }
+            .foregroundStyle(isChanged ? Color.snapReset : .white.opacity(isDeveloping ? 1 : 0.75))
+            .animation(.easeOut(duration: 0.15), value: isChanged)
     }
 }
 

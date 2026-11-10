@@ -28,7 +28,7 @@ struct PositiveFilmProfile: Codable, Equatable {
     ///
     /// A develop setting rather than a camera one, so it re-applies when a
     /// stored negative is re-filtered and travels to Lightroom as
-    /// `crs:Exposure2012`. The panel's slider moves it. The stepper beside the
+    /// `crs:Exposure2012`. The panel's slider moves it. The wheel beside the
     /// shutter does not: that is the camera's own compensation, which is the
     /// only one of the two that can bring a clipped highlight back.
     var exposure: Float = 0

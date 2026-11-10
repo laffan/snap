@@ -712,7 +712,7 @@ struct CameraView: View {
                 .buttonStyle(.plain)
                 .disabled(camera.isCapturing)
                 // Just clear of the shutter's ring, and well clear of the
-                // exposure stepper at the trailing edge.
+                // exposure wheel at the trailing edge.
                 .offset(x: 68)
                 .accessibilityLabel("Capture preview frame")
 
@@ -729,10 +729,14 @@ struct CameraView: View {
                     exposureColumn
 
                     Spacer()
-
-                    ExposureControl(camera: camera)
                 }
                 .padding(.horizontal, 14)
+
+                // Against the screen's edge rather than inside the row's
+                // margin: the wheel's centre is meant to be just past it, so
+                // only the side of the rim is in view.
+                ExposureControl(camera: camera)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         // The live row is held to the height of the exposure column, the
@@ -1544,7 +1548,7 @@ private struct SubProfileToggles: View {
     }
 }
 
-/// The stepper beside the shutter, on the camera's own exposure
+/// The wheel at the right of the shutter row, on the camera's own exposure
 /// compensation.
 ///
 /// It used to move the develop Exposure, the same value as the panel's
@@ -1561,7 +1565,7 @@ private struct ExposureControl: View {
     @ObservedObject var camera: CameraModel
 
     var body: some View {
-        ExposureStepper(value: $camera.exposureBias, range: -3...3, step: 1.0 / 3)
+        ExposureWheel(value: $camera.exposureBias, range: -3...3, step: 1.0 / 3)
     }
 }
 
