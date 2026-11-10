@@ -231,10 +231,23 @@ final class PositiveFilmFilter {
         // an assumption about what colour the light was.
         var color = clamp01(whiteBalanced(input, amount: profile.temperatureAmount))
         color = clamp01(calibration * color)
+        // The scene as the sensor saw it, before the look has had its say
+        // about greens — which is the only thing the infrared estimate can be
+        // made from, and the look would otherwise have crushed half of it.
+        let scene = color
         color = clamp01(shiftBlacks(color, by: profile.blacksShift))
         color = sCurve(color, amount: profile.contrastAmount)
         color = clamp01(applyVibrance(color, amount: profile.vibranceAmount))
         color = applyColorMixer(color, bands: bands)
+
+        // After the mixer rather than before it: the look takes Purple and
+        // Magenta almost out, and those are exactly the colours infrared
+        // foliage comes out as.
+        let infraredAmount = profile.infraredAmount
+        if infraredAmount > 0 {
+            color = infrared(color, scene: scene, amount: infraredAmount)
+        }
+
         color = sCurve(color, amount: profile.toneCurveAmount)
         color = liftBlacks(color, by: profile.blackLift)
 
@@ -242,10 +255,41 @@ final class PositiveFilmFilter {
         // desaturated arrives here darker or lighter than one that wasn't,
         // which is exactly how a black-and-white mixer works.
         if profile.blackAndWhite {
-            color = RGB(repeating: luma(clamp01(color)))
+            let graded = clamp01(color)
+            // Black-and-white infrared is the infrared record on its own:
+            // white trees under a black sky. After the mapping above, that
+            // record is the red channel.
+            color = RGB(repeating: lerp(luma(graded), graded.x, infraredAmount))
         }
 
         return clamp01(color)
+    }
+
+    // MARK: - Infrared
+
+    /// Colour infrared film, laid over the grade by `amount`.
+    ///
+    /// The film's three layers each see one band further down the spectrum
+    /// than their dye shows: red shows infrared, green shows red, blue shows
+    /// green, and blue light is filtered out altogether. So the graded red
+    /// moves to green, the graded green to blue, and red is given the
+    /// infrared record.
+    ///
+    /// There is no infrared record to give it — the sensor sits behind a
+    /// filter that stops it — so one is estimated from the scene. What
+    /// reflects infrared brightly is mostly what is green: leaves and grass,
+    /// whose chlorophyll is transparent to it. What reflects almost none is
+    /// what is blue: sky and water. So the estimate is the scene's brightness,
+    /// leaning on green, raised by how much greener than blue a colour is and
+    /// lowered by how much bluer. Its weights sum to one over a neutral, so a
+    /// grey wall stays grey and white stays white.
+    ///
+    /// Foliage comes out red to magenta, sky deep blue, skin pale cream, and a
+    /// red flower yellow-green — the four things the film is recognised by.
+    private static func infrared(_ graded: RGB, scene: RGB, amount: Float) -> RGB {
+        let record = clamp01(0.25 * scene.x + 0.75 * scene.y + (scene.y - scene.z))
+        let shifted = RGB(record, graded.x, graded.y)
+        return clamp01(graded + (shifted - graded) * amount)
     }
 
     // MARK: - HSL colour mixer
