@@ -12,10 +12,12 @@
 //
 //  The keypad is the control. The number dialled is the session: frames, then
 //  seconds between frames, then seconds of lead-in, split by pound signs — see
-//  `StreetPadPlan`. The green call button starts it and, red while it runs,
-//  ends it. Calls and Contacts switch the two axes of the level guide on and
-//  off, marked with a small blue dot carrying the axis. Search, at the lower
-//  right where it always is, closes StreetPad.
+//  `StreetPadPlan` — and the line under the number, where the Phone app says
+//  Add Number, says so: Shots#Interval#Prep. The green call button starts it
+//  and, red while it runs, ends it. Either volume button takes a frame of its
+//  own at any point. Calls and Contacts switch the level guide onto one axis
+//  or the other, marked with a small blue dot carrying the axis. Search, at
+//  the lower right where it always is, closes StreetPad.
 //
 //  Opened by three taps on the empty space under the lower right corner of the
 //  frame — unmarked, since a button labelled "pretend to be the Phone app"
@@ -89,7 +91,9 @@ struct StreetPad: View {
                 .frame(height: metrics.numberSize * 1.25)
                 .padding(.horizontal, 28)
 
-            Text("Add Number")
+            // Where the Phone app offers Add Number: the key to what the
+            // number means, in the order the fields are dialled.
+            Text("Shots#Interval#Prep")
                 .font(.system(size: 17 * metrics.scale, weight: .regular))
                 .foregroundStyle(PadColor.blue)
                 .opacity(number.isEmpty ? 0 : 1)
@@ -212,7 +216,8 @@ struct StreetPad: View {
     /// Keypad is always the one lit, because it is the one being used. The
     /// other two are switches for the level guide, and say they are on with
     /// a blue dot carrying the axis they hold level — Z for the horizon, X for
-    /// pointing straight out.
+    /// pointing straight out. One at a time: switching either on switches the
+    /// other off — see `StreetPadSession.levelsHorizon`.
     private var tabBar: some View {
         HStack(spacing: 12) {
             HStack(spacing: 0) {

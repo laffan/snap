@@ -1154,6 +1154,14 @@ struct CameraView: View {
     private func hardwareShutter() {
         guard isHardwareShutterArmed else { return }
 
+        // Behind the keypad a press is a frame whenever it comes — before a
+        // run, during its lead-in, between its frames — and is answered with
+        // StreetPad's thud in the earpiece rather than with nothing.
+        if isShowingStreetPad {
+            streetPad.takeNow(camera: camera)
+            return
+        }
+
         if isDeveloping {
             primaryAction(titled: false)
         } else {

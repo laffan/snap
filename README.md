@@ -1398,13 +1398,14 @@ The keys work as keys: each digit lands in the number on touch-down and plays
 the keypad's own tone, which the silent switch silences the way it silences
 the Phone app's. Holding zero types a plus; holding delete deletes on its own,
 one digit and then quickly. And what is dialled is three numbers split by pound
-signs:
+signs, which the line under the number spells out — **Shots#Interval#Prep**,
+where the Phone app would offer Add Number:
 
 | | |
 | --- | --- |
-| **Frames** | how many photographs |
+| **Shots** | how many photographs |
 | **Interval** | seconds from one to the next |
-| **Lead-in** | seconds from the call button to the first |
+| **Prep** | seconds from the call button to the first |
 
 So `3#10#3` is three frames ten seconds apart, the first one three seconds
 after the call — taken at 3, 13 and 23 seconds. The last two can be left off
@@ -1428,15 +1429,18 @@ headphones in, it goes to them instead.
 
 | | |
 | --- | --- |
-| **Tick** | a dry click for each second of the lead-in, starting at the press of the call button |
-| **Beep** | a short, soft E6 as each frame is taken |
-| **Pips** | the level guide, below |
+| **Tick** | a dry click for each second of the prep, starting at the press of the call button |
+| **Thud** | as each frame is taken, the run's or a volume button's |
+| **Clicks** | the level guide, below |
 
-The tones are made in code — a few hundred milliseconds of sine wave each, eased
-in and out so they don't click, the tick struck and left to die away so it
-does — and played at a fraction of full volume on top of a speaker that is
-already quiet. Set the volume before opening StreetPad: while it is up the
-volume buttons are the shutter, so they can't turn it up.
+The sounds are made in code and played at a fraction of full volume on top of a
+speaker that is already quiet. The tick is a struck sine left to die away. The
+thud is a struck tone falling from 150 Hz to 55 over a tenth of a second with a
+little noise at its front; the earpiece barely plays below a couple of hundred
+hertz, so an octave above rides along to carry it. The level guide's click is a
+few milliseconds of noise and nothing else. Set the volume before opening
+StreetPad: while it is up the volume buttons are the shutter, so they can't
+turn it up.
 
 It was haptics before, and haptics turned out not to come through on every
 phone while the camera is running. The knocks are still tried alongside — a
@@ -1455,29 +1459,24 @@ app brings back the last number called; pressing it again calls it.
 
 ### Calls and Contacts hold it level
 
-Calls and Contacts are switches for the level guide, one axis each. A small blue
-dot on the icon carries the axis while it is on:
+Calls and Contacts switch the level guide onto one axis or the other — one at a
+time, since switching either on switches the other off. A small blue dot on the
+icon carries the axis while it is on:
 
 | | Axis | Holds |
 | --- | --- | --- |
 | **Calls** | Z, straight through the screen | the horizon — turning about it tilts a skyline |
 | **Contacts** | X, across the phone | pointing straight out — turning about it tips the camera up at a building or down at the pavement, and leans its verticals |
 
-During a session, with either on, the earpiece pips to say how far the phone
-is from upright, and which way. Within a degree it is silent. Past that it pips
-faster the further off it is, from once every 0.6 seconds just off level to
-every 0.07 seconds at fifteen degrees and beyond. The pip itself says which
-axis and which side:
-
-| | High | Low |
-| --- | --- | --- |
-| **One pip** — the horizon | leaning right | leaning left |
-| **Two pips** — pointing | pointing up | pointing down |
-
-So a fast, low single pip is a phone leaning well over to the left. With both
-on, it reports whichever is further off. Silence is what to aim for: tilt
-against the pitch and the pips slow down and stop. Each pip is also a tap, as
-hard as the pip is fast, for phones whose haptics come through.
+During a session the earpiece clicks like a Geiger counter: very quiet taps at
+random, sparse far from upright and quickening as the phone comes round to it —
+about one and a half a second at twenty degrees off and beyond, about
+twenty-five a second just short of it. **Within half a degree it goes quiet.**
+The rate climbs on a logarithmic scale of the error, so the last couple of
+degrees, where the aiming actually happens, get most of the change. Silence is
+what to aim for, and the rush just before it is how you know you are nearly
+there. It says how far and not which way. Each click is also a light tap, for
+phones whose haptics come through.
 
 The reading is gravity as Core Motion fuses it from the gyroscope and the
 accelerometer — the gyroscope is what keeps it steady while the phone is being
@@ -1485,11 +1484,11 @@ carried, where the accelerometer alone would read every step as a tilt. The
 horizon is measured from the nearest quarter turn rather than from portrait
 alone, because the photograph is turned upright by quarter turns when it is
 taken (see [Which way up](#which-way-up)): a phone held level on its side takes
-a level photograph too. A phone lying flat has no horizon to read, so with
-only the horizon on it says what is actually wrong instead — which way the
-phone is facing — in pointing's two pips. Neither runs outside a session: the
-motion hardware costs power, and a phone pipping in a pocket while nothing is
-being taken is a phone being annoying.
+a level photograph too. A phone lying flat has no horizon to read, so with the
+horizon on it measures what is actually wrong instead — which way the phone is
+facing. Neither runs outside a session: the motion hardware costs power, and a
+phone clicking in a pocket while nothing is being taken is a phone being
+annoying.
 
 ### Search closes it
 
@@ -1497,8 +1496,12 @@ Search, in its circle at the lower right, closes StreetPad, and a session still
 running ends with it. The app leaving ends one too — the camera stops when it
 goes — but leaves the keypad up, with the number on it, for coming back to.
 
-The volume buttons stay the shutter while it is up (see [The volume
-buttons](#the-volume-buttons)).
+**The volume buttons take a frame at any point while it is up** — with no
+session going, during the prep, or between a session's frames — and answer
+with the thud. A press that lands while a frame is still being developed waits
+for it rather than being dropped, and a session's schedule doesn't move for it:
+its next frame waits the same way if the pressed one is still going. See also
+[The volume buttons](#the-volume-buttons).
 
 ### The keypad itself
 

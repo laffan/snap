@@ -7,17 +7,18 @@
 //  A phone held up as if about to make a call has its earpiece at the top,
 //  and the earpiece is quiet enough to be heard by the person holding it and
 //  by nobody else. So that is where these go: a tick for each second of the
-//  lead-in, a soft beep as each frame is taken, and the level guide's pips.
+//  lead-in, a thud as each frame is taken, and the level guide's Geiger
+//  clicks.
 //  With headphones in, they go to the headphones instead, which is better
 //  still.
 //
 //  They used to be haptics alone, and haptics turned out not to arrive on
 //  every phone the camera runs on. Sound does.
 //
-//  The tones are made here rather than shipped as files: a few hundred
-//  milliseconds of sine wave each, written into WAV data once and handed to
-//  an `AVAudioPlayer` apiece, so the same sound asked for twice restarts
-//  rather than queueing behind itself.
+//  The sounds are made here rather than shipped as files: a few milliseconds
+//  to a tenth of a second of sine wave or noise each, written into WAV data
+//  once and handed to an `AVAudioPlayer` apiece, so the same sound asked for
+//  twice restarts rather than queueing behind itself.
 //
 
 import AVFoundation
@@ -28,15 +29,12 @@ final class StreetPadSounds {
     enum Sound: CaseIterable {
         /// One second of the lead-in going by: a short, dry click.
         case tick
-        /// A frame being taken: a soft, short beep, higher than anything
-        /// else here.
+        /// A frame being taken: a low, dull thud, the sound of something
+        /// closing rather than of anything electronic.
         case shutter
-        /// The level guide, horizon off: one pip, high when the phone leans
-        /// to the right, low when it leans to the left.
-        case horizonHigh, horizonLow
-        /// The level guide, pointing off: two pips, high when the camera
-        /// points up, low when it points down.
-        case pointingHigh, pointingLow
+        /// The level guide: one very quiet Geiger-counter click, a few
+        /// milliseconds of noise. The guide decides how often.
+        case click
     }
 
     private var players: [Sound: AVAudioPlayer] = [:]
@@ -122,15 +120,33 @@ final class StreetPadSounds {
     }
 
     /// A sine at `frequency`, eased in and out so it starts and stops without
-    /// a click — or, for a tick, struck and left to die away, which is what
-    /// makes it a click.
+    /// a click — or, struck, left to die away from full, which is what makes
+    /// a tick a tick and a thud a thud.
+    ///
+    /// A struck tone can fall in pitch as it goes, which is most of what a
+    /// thud is, and carry an octave above for the small speakers that can't
+    /// play the fundamental. `noise` mixes in white noise, all the way to a
+    /// Geiger click that is nothing else.
     private static func tone(_ tone: Tone) -> [Float] {
         let count = Int(tone.duration * sampleRate)
         let attack = max(1, Int(0.004 * sampleRate))
         var samples = [Float](repeating: 0, count: count + Int(tone.gap * sampleRate))
 
+        // The same noise every launch: a fixed seed, so a sound is the same
+        // sound each time it is made.
+        var seed: UInt32 = 0x2545_F491
+        func noise() -> Double {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            return Double(seed) / Double(UInt32.max) * 2 - 1
+        }
+
+        let endFrequency = tone.endFrequency ?? tone.frequency
+        var phase = 0.0
+        let level = 1 / (1 + tone.overtone)
+
         for index in 0..<count {
             let time = Double(index) / sampleRate
+            let progress = Double(index) / Double(max(count - 1, 1))
             let envelope: Double
             if tone.isStruck {
                 envelope = exp(-time / (tone.duration / 5))
@@ -139,7 +155,13 @@ final class StreetPadSounds {
                 let fall = min(1, Double(count - index) / Double(attack * 3))
                 envelope = min(rise, fall)
             }
-            samples[index] = Float(sin(2 * .pi * tone.frequency * time) * envelope)
+
+            // Falling exponentially, the way a struck body settles.
+            let frequency = tone.frequency * pow(endFrequency / tone.frequency, progress)
+            phase += 2 * .pi * frequency / sampleRate
+            let pitched = (sin(phase) + tone.overtone * sin(2 * phase)) * level
+            let value = pitched * (1 - tone.noise) + noise() * tone.noise
+            samples[index] = Float(value * envelope)
         }
         return samples
     }
@@ -178,43 +200,46 @@ final class StreetPadSounds {
 /// One tone of a sound.
 private struct Tone {
     var frequency: Double
+    /// Where the pitch has fallen (or risen) to by the end. Nil holds it.
+    var endFrequency: Double? = nil
     var duration: Double
     /// Silence after it, before the next tone of the same sound.
     var gap: Double = 0
     var isStruck = false
+    /// How loud the octave above is against the fundamental, 0...1.
+    var overtone: Double = 0
+    /// How much of it is white noise rather than tone, 0...1.
+    var noise: Double = 0
 }
 
 private extension StreetPadSounds.Sound {
 
-    /// Pitches are kept apart by a fifth or more, so which one is playing is
-    /// never in doubt: the level guide's two at G5 and C5, the frame's beep
-    /// well above both at E6, and the tick a click rather than a note.
     var tones: [Tone] {
         switch self {
         case .tick:
             return [Tone(frequency: 2_400, duration: 0.02, isStruck: true)]
         case .shutter:
-            return [Tone(frequency: 1_318.5, duration: 0.07)]
-        case .horizonHigh:
-            return [Tone(frequency: 784, duration: 0.045)]
-        case .horizonLow:
-            return [Tone(frequency: 523.25, duration: 0.045)]
-        case .pointingHigh:
-            return [Tone(frequency: 784, duration: 0.035, gap: 0.045),
-                    Tone(frequency: 784, duration: 0.035)]
-        case .pointingLow:
-            return [Tone(frequency: 523.25, duration: 0.035, gap: 0.045),
-                    Tone(frequency: 523.25, duration: 0.035)]
+            // From 150 Hz down to 55 over a tenth of a second, with a little
+            // noise for the knock at the front. The octave above is for the
+            // earpiece, which barely plays below a couple of hundred hertz:
+            // it carries the thud where the fundamental can't.
+            return [Tone(frequency: 150, endFrequency: 55, duration: 0.11,
+                         isStruck: true, overtone: 0.6, noise: 0.12)]
+        case .click:
+            // A few milliseconds of noise, struck and gone — the sound a
+            // Geiger counter makes, and a sound with no pitch to be noticed by.
+            return [Tone(frequency: 1_000, duration: 0.004, isStruck: true, noise: 1)]
         }
     }
 
-    /// Quiet, on top of what is already a quiet speaker. The beep is the
-    /// quietest of all: it is a confirmation, not an alarm.
+    /// Quiet, on top of what is already a quiet speaker. The click quietest
+    /// of all, since there can be twenty-five of it a second; the thud loudest,
+    /// since low sounds come out of a small speaker quietest.
     var volume: Float {
         switch self {
         case .tick:    return 0.45
-        case .shutter: return 0.3
-        default:       return 0.35
+        case .shutter: return 0.8
+        case .click:   return 0.15
         }
     }
 }

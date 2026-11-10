@@ -13,10 +13,13 @@
 //
 //  Nothing here looks at the screen, because the point is that nobody is.
 //  Everything is said through the earpiece instead — see `StreetPadSounds`:
-//  a tick for each second of the lead-in, a soft beep as each frame is taken,
-//  and the level guide's pips when Calls or Contacts has switched an axis of
-//  it on. The knocks the run has always had are still tried alongside, for
-//  the phones that deliver them.
+//  a tick for each second of the lead-in, a thud as each frame is taken, and
+//  the level guide's quiet Geiger-counter taps when Calls or Contacts has
+//  switched it on. The knocks the run has always had are still tried
+//  alongside, for the phones that deliver them.
+//
+//  Either volume button takes a frame too, whenever StreetPad is up — before
+//  a run, in its lead-in, or between its frames. See `takeNow`.
 //
 
 import Combine
@@ -80,18 +83,32 @@ final class StreetPadSession: ObservableObject {
     /// The horizon: turning about the axis straight through the screen, which
     /// is what tilts a skyline. Switched on and off by Calls, marked on it
     /// as Z.
+    ///
+    /// One axis at a time: switching this on switches pointing off. One sound
+    /// can only say one thing, and with both on there was no telling which
+    /// axis it was about.
     @Published var levelsHorizon = false {
-        didSet { updateLevelGuide() }
+        didSet {
+            if levelsHorizon, levelsPitch { levelsPitch = false }
+            updateLevelGuide()
+        }
     }
 
     /// Pointing: turning about the axis across the phone, which tips the
     /// camera up at a building or down at the pavement and makes its verticals
-    /// lean in. Switched on and off by Contacts, marked on it as X.
+    /// lean in. Switched on and off by Contacts, marked on it as X. Switching
+    /// it on switches the horizon off.
     @Published var levelsPitch = false {
-        didSet { updateLevelGuide() }
+        didSet {
+            if levelsPitch, levelsHorizon { levelsHorizon = false }
+            updateLevelGuide()
+        }
     }
 
     private var run: Task<Void, Never>? = nil
+    /// Volume-button presses still waiting for the camera. The audio session
+    /// stays up until the last of them has had its thud.
+    private var pendingPresses = 0
     private let sounds = StreetPadSounds()
     private lazy var level = LevelGuide(sounds: sounds)
 
@@ -138,13 +155,53 @@ final class StreetPadSession: ObservableObject {
                     return
                 }
                 camera.capture()
-                // Quiet, short, and the only sign there is now that the
+                // Low, short, and the only sign there is now that the
                 // shutter makes no sound of its own.
                 sounds.play(.shutter)
             }
 
             self?.finish()
         }
+    }
+
+    /// A frame now, off either volume button, whatever a run is doing.
+    ///
+    /// Taken as the camera's own shutter would take it, the moment the camera
+    /// is free: a press that lands while a frame — the run's or an earlier
+    /// press's — is still being developed waits for it rather than being
+    /// dropped. The run's schedule doesn't move; its next frame waits in the
+    /// same way if this one is still going when it falls due.
+    ///
+    /// Works with no run going too, which is why it takes the audio session
+    /// for itself: the thud is the only answer the press gets.
+    func takeNow(camera: CameraModel) {
+        pendingPresses += 1
+        sounds.activate()
+
+        let sounds = self.sounds
+        Task { [weak self] in
+            let clock = ContinuousClock()
+            // A camera that never comes free — stopped by the app leaving —
+            // is given up on rather than waited for forever.
+            let deadline = clock.now + .seconds(5)
+            var isTaken = false
+            while clock.now < deadline {
+                if !camera.isCapturing, camera.state == .running {
+                    camera.capture()
+                    sounds.play(.shutter)
+                    isTaken = true
+                    break
+                }
+                try? await clock.sleep(for: .milliseconds(50), tolerance: nil)
+            }
+            if !isTaken { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+            self?.pressFinished()
+        }
+    }
+
+    private func pressFinished() {
+        pendingPresses -= 1
+        if pendingPresses == 0, !isRunning { sounds.deactivate() }
     }
 
     /// Ends the run, if there is one. The call button pressed a second time,
@@ -169,7 +226,7 @@ final class StreetPadSession: ObservableObject {
         isRunning = false
         UIApplication.shared.isIdleTimerDisabled = false
         updateLevelGuide()
-        sounds.deactivate()
+        if pendingPresses == 0 { sounds.deactivate() }
         if knock { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
     }
 
@@ -194,14 +251,18 @@ final class StreetPadSession: ObservableObject {
 /// phone is being carried, where the accelerometer alone would read every step
 /// as a tilt.
 ///
-/// Within a degree of level it is silent. Past that it pips in the earpiece,
-/// faster the further off it is: a pip every 0.6 seconds a little off, every
-/// 0.07 at fifteen degrees and beyond. The pip says which way, too. One pip is
-/// the horizon and two are pointing; high is leaning right or pointing up, low
-/// is leaning left or pointing down. With both axes on it reports whichever is
-/// further off. Silence is the answer to aim for.
+/// It sounds like a Geiger counter: very quiet taps at random, sparse far from
+/// upright and quickening as the phone comes round to it — about one and a
+/// half a second at twenty degrees off and beyond, about twenty-five a second
+/// just short of it. Within half a degree it goes quiet. Silence is the answer
+/// to aim for, and the rush just before it is how you know you are nearly
+/// there.
 ///
-/// Each pip is also a tap, as hard as the pip is fast, for the phones whose
+/// The rate climbs on a logarithmic scale of the error, so the last couple of
+/// degrees — where the aiming actually happens — get most of the change.
+///
+/// It says how far and not which way: one axis at a time, and the taps are
+/// all the same tap. Each is also a light haptic tap, for the phones whose
 /// haptics come through while the camera is running.
 @MainActor
 final class LevelGuide {
@@ -209,15 +270,19 @@ final class LevelGuide {
     var tracksHorizon = false
     var tracksPitch = false
 
-    /// Within this, in degrees, the phone is level and nothing sounds.
-    static let tolerance = 1.0
-    /// Past this, in degrees, the pips are as fast as they get.
-    static let saturation = 15.0
+    /// Within this, in degrees, the phone is upright and nothing sounds.
+    static let tolerance = 0.5
+    /// Past this, in degrees, the taps are as sparse as they get.
+    static let far = 20.0
+    /// Taps a second, on average, at `far` and beyond.
+    static let slowestRate = 1.5
+    /// Taps a second, on average, just outside `tolerance`.
+    static let fastestRate = 25.0
 
     private let sounds: StreetPadSounds
     private let motion = CMMotionManager()
-    private let haptic = UIImpactFeedbackGenerator(style: .rigid)
-    private var lastPulse: CFTimeInterval = 0
+    private let haptic = UIImpactFeedbackGenerator(style: .light)
+    private var lastUpdate: CFTimeInterval? = nil
 
     init(sounds: StreetPadSounds) {
         self.sounds = sounds
@@ -226,6 +291,7 @@ final class LevelGuide {
     func start() {
         guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
         motion.deviceMotionUpdateInterval = 1.0 / 60
+        lastUpdate = nil
         haptic.prepare()
         motion.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
             guard let gravity = data?.gravity else { return }
@@ -238,43 +304,37 @@ final class LevelGuide {
         motion.stopDeviceMotionUpdates()
     }
 
+    /// Mean taps a second for an error of `magnitude` degrees.
+    static func rate(forError magnitude: Double) -> Double {
+        let t = min(max(log(magnitude / tolerance) / log(far / tolerance), 0), 1)
+        return fastestRate * pow(slowestRate / fastestRate, t)
+    }
+
     private func respond(to gravity: CMAcceleration) {
-        // The axis furthest off, and which side of level it is on.
-        var worst: (error: Double, isPointing: Bool) = (0, false)
-        if tracksHorizon {
-            if let error = LevelGuide.horizonError(gravity) {
-                if abs(error) > abs(worst.error) { worst = (error, false) }
-            } else {
-                // Lying flat there is no horizon to read, and what is wrong
-                // is which way the phone faces — so that is what is said.
-                worst = (LevelGuide.pitchError(gravity), true)
-            }
-        }
+        let error: Double
         if tracksPitch {
-            let error = LevelGuide.pitchError(gravity)
-            if abs(error) > abs(worst.error) { worst = (error, true) }
+            error = LevelGuide.pitchError(gravity)
+        } else if tracksHorizon {
+            // Lying flat there is no horizon to read, and what is wrong is
+            // which way the phone faces — so that is what is measured.
+            error = LevelGuide.horizonError(gravity) ?? LevelGuide.pitchError(gravity)
+        } else {
+            return
         }
 
-        let magnitude = abs(worst.error)
-        guard magnitude > LevelGuide.tolerance else { return }
-
-        let t = min((magnitude - LevelGuide.tolerance) / (LevelGuide.saturation - LevelGuide.tolerance), 1)
-        // From a pip every 0.6 s just off level to one every 0.07 s far off.
-        // Two pips need a little longer to be two.
-        let fastest = worst.isPointing ? 0.14 : 0.07
-        let interval = 0.6 + (fastest - 0.6) * t
         let now = CACurrentMediaTime()
-        guard now - lastPulse >= interval else { return }
-        lastPulse = now
+        defer { lastUpdate = now }
+        let magnitude = abs(error)
+        guard magnitude > LevelGuide.tolerance, let previous = lastUpdate else { return }
 
-        let isHigh = worst.error > 0
-        switch (worst.isPointing, isHigh) {
-        case (false, true):  sounds.play(.horizonHigh)
-        case (false, false): sounds.play(.horizonLow)
-        case (true, true):   sounds.play(.pointingHigh)
-        case (true, false):  sounds.play(.pointingLow)
-        }
-        haptic.impactOccurred(intensity: CGFloat(0.35 + 0.65 * t))
+        // A tap in this slice of time with the chance the rate gives it, which
+        // is what makes the taps random rather than a metronome. Capped, so a
+        // late update doesn't come back as a burst.
+        let elapsed = min(now - previous, 0.1)
+        guard Double.random(in: 0..<1) < LevelGuide.rate(forError: magnitude) * elapsed else { return }
+
+        sounds.play(.click)
+        haptic.impactOccurred(intensity: 0.4)
         haptic.prepare()
     }
 
