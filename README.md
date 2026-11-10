@@ -451,9 +451,11 @@ The bar and the roll are attached. Tapping **Develop** lifts the pair to just
 under the frame and fills in the sliders beneath them, while everything to do
 with taking a photograph — the shutter, the modes, the lens dots, the caption —
 leaves upward and slides in behind the frame. Tapping it again puts it all back:
-it is one switch, in one place, and it reads as lit while the sliders are open —
-underlined, with a down chevron beside it for the way the panel goes when it is
-pressed again.
+it is one switch, in one place, and it reads as lit while the sliders are open.
+A chevron after the word says which way the panel will go when it is pressed:
+up while it is closed, and down, with the word underlined, while it is open. It
+is there in both states so the bar is the same width either way and the heart
+beside it never moves.
 
 **Develop turns red whenever something has been changed in the panel**, on the
 camera screen as well as in the panel, so a photograph isn't taken in a

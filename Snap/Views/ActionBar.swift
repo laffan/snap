@@ -91,8 +91,9 @@ struct ActionBar: View {
     /// It is the only way out of the panel, too. There was a Done beside Reset
     /// that did exactly this, which made one switch look like two — and the one
     /// that stays in the same place whichever screen you are on is the one
-    /// worth keeping. While the panel is open it is underlined, with a down
-    /// chevron beside it, which is the way the panel goes when it is pressed.
+    /// worth keeping. A chevron after the word says which way the panel goes
+    /// when it is pressed: up while it is closed, down — with the word
+    /// underlined — while it is open.
     private var develop: some View {
         Button(action: onToggleDevelop) {
             DevelopLabel(look: look, isDeveloping: isDeveloping)
@@ -199,21 +200,21 @@ private struct DevelopLabel: View {
     }
 
     var body: some View {
-        Text("Develop")
-            .font(.system(size: 13, weight: .semibold))
-            .underline(isDeveloping)
-            // Hung off the word rather than laid beside it, in the gap before
-            // the heart, so opening the panel doesn't push the heart along.
-            .overlay(alignment: .trailing) {
-                if isDeveloping {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .alignmentGuide(.trailing) { $0[.leading] - 3 }
-                        .transition(.opacity)
-                }
-            }
-            .foregroundStyle(isChanged ? Color.snapReset : .white.opacity(isDeveloping ? 1 : 0.75))
-            .animation(.easeOut(duration: 0.15), value: isChanged)
+        HStack(spacing: 4) {
+            Text("Develop")
+                .font(.system(size: 13, weight: .semibold))
+                .underline(isDeveloping)
+
+            // After the word, in both states, so the bar is the same width
+            // either way and the heart beside it never moves. One chevron
+            // turned over rather than two swapped, so it turns with the panel
+            // as it opens and closes.
+            Image(systemName: "chevron.up")
+                .font(.system(size: 9, weight: .bold))
+                .rotationEffect(.degrees(isDeveloping ? 180 : 0))
+        }
+        .foregroundStyle(isChanged ? Color.snapReset : .white.opacity(isDeveloping ? 1 : 0.75))
+        .animation(.easeOut(duration: 0.15), value: isChanged)
     }
 }
 
