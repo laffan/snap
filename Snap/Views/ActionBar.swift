@@ -172,11 +172,17 @@ struct ActionBar: View {
 
 /// The word on the switch the panel hangs off.
 ///
-/// Red, the colour Reset turns, whenever the look is anything but the one the
-/// app ships with — the same test Reset makes, so the two always agree. Reset
-/// is only on the bar while the panel is open; this is the one that says so
-/// from the camera screen, before the photograph is taken in a look nobody
-/// remembered leaving on.
+/// Red, the colour Reset turns, whenever something has been changed in the
+/// panel — on the camera screen as well, so a photograph isn't taken in a
+/// developed look nobody remembered leaving on.
+///
+/// Narrower than Reset's test. Black and white and the house, the moon and
+/// the leaf are left out: each has its own control on the camera screen that
+/// already says whether it is on, and black and white is kept across launches
+/// by somebody who shoots that way, which would leave this red for good. What
+/// is compared is the rendering — the default look with the same switches
+/// thrown, against this one — so a slider a sub-profile holds counts once it
+/// has been moved by hand, and a sub-profile's own settings don't.
 ///
 /// Watches the look itself, for the same reason Reset does.
 private struct DevelopLabel: View {
@@ -184,7 +190,13 @@ private struct DevelopLabel: View {
     @ObservedObject var look: LookModel
     var isDeveloping: Bool
 
-    private var isChanged: Bool { look.profile != PositiveFilmProfile() }
+    private var isChanged: Bool {
+        let profile = look.profile
+        var untouched = PositiveFilmProfile()
+        untouched.blackAndWhite = profile.blackAndWhite
+        untouched.subProfiles = profile.subProfiles
+        return profile.resolved != untouched.resolved
+    }
 
     var body: some View {
         Text("Develop")

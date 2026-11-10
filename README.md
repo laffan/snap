@@ -455,11 +455,14 @@ it is one switch, in one place, and it reads as lit while the sliders are open �
 underlined, with a down chevron beside it for the way the panel goes when it is
 pressed again.
 
-**Develop turns red whenever the look is not the one the app ships with**, on
-the camera screen as well as in the panel. It makes the same test Reset does,
-so the two always agree — but Reset is only on the bar while the panel is open,
-and this is what says so before a photograph is taken in a look nobody
-remembered leaving on.
+**Develop turns red whenever something has been changed in the panel**, on the
+camera screen as well as in the panel, so a photograph isn't taken in a
+developed look nobody remembered leaving on. Black and white and the
+sub-profiles don't light it: each has its own control on the camera screen
+that already shows whether it is on, and black and white is kept across
+launches, which would leave Develop red for good for anybody who shoots that
+way. A slider that a sub-profile holds does count once it has been moved by
+hand. Reset's test stays the wider one, since Reset puts all of it back.
 
 There was a **Done** beside Reset that did exactly that, which made one switch
 look like two — and between a word that appears at the far end of the bar only
