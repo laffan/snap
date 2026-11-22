@@ -144,10 +144,11 @@ final class StreetPadSession: ObservableObject {
             for index in 0..<plan.frames {
                 do {
                     try await clock.sleep(until: start + .seconds(plan.time(ofFrame: index)), tolerance: nil)
-                    // One capture at a time, and none into a camera that
-                    // isn't running: a frame due while the last is still being
-                    // developed waits for it rather than being dropped.
-                    while camera.isCapturing || camera.state != .running {
+                    // None into a camera that isn't running, and none while
+                    // the shutter is busy: a frame due while the last is still
+                    // coming off the sensor, or while ten are already waiting
+                    // to be developed, waits rather than being dropped.
+                    while camera.isShutterBusy || camera.state != .running {
                         try await clock.sleep(for: .milliseconds(50), tolerance: nil)
                     }
                 } catch {
@@ -166,11 +167,12 @@ final class StreetPadSession: ObservableObject {
 
     /// A frame now, off either volume button, whatever a run is doing.
     ///
-    /// Taken as the camera's own shutter would take it, the moment the camera
+    /// Taken as the camera's own shutter would take it, the moment the shutter
     /// is free: a press that lands while a frame — the run's or an earlier
-    /// press's — is still being developed waits for it rather than being
-    /// dropped. The run's schedule doesn't move; its next frame waits in the
-    /// same way if this one is still going when it falls due.
+    /// press's — is still coming off the sensor, or while the buffer is full,
+    /// waits rather than being dropped. The run's schedule doesn't move; its
+    /// next frame waits in the same way if the shutter is still busy when it
+    /// falls due.
     ///
     /// Works with no run going too, which is why it takes the audio session
     /// for itself: the thud is the only answer the press gets.
@@ -186,7 +188,7 @@ final class StreetPadSession: ObservableObject {
             let deadline = clock.now + .seconds(5)
             var isTaken = false
             while clock.now < deadline {
-                if !camera.isCapturing, camera.state == .running {
+                if !camera.isShutterBusy, camera.state == .running {
                     camera.capture()
                     sounds.play(.shutter)
                     isTaken = true

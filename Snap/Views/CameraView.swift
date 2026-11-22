@@ -189,7 +189,7 @@ struct CameraView: View {
                                  isRAWAvailable: camera.isRAWAvailable,
                                  negativeStatus: camera.negativeStatus,
                                  isMonochromeLocked: camera.isMonochromeLocked,
-                                 isBusy: camera.isCapturing,
+                                 isBusy: camera.isBusy || camera.hasBufferedFrames,
                                  info: developInfo,
                                  onDelete: deleteDeveloping,
                                  onLoad: { isLoadingLook = true },
@@ -619,8 +619,11 @@ struct CameraView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(camera.isCapturing)
-        .opacity(camera.isCapturing ? 0.4 : 1)
+        // Waits for the buffer to empty as well as for the sensor: this one is
+        // developed while you wait, and never alongside a frame the buffer is
+        // still developing.
+        .disabled(camera.isBusy || camera.hasBufferedFrames)
+        .opacity(camera.isBusy || camera.hasBufferedFrames ? 0.4 : 1)
         .accessibilityHint("Takes a photograph with these settings")
     }
 
@@ -630,6 +633,7 @@ struct CameraView: View {
     /// while the panel is open, a frame to look at otherwise.
     private var roll: some View {
         FilmStrip(store: store,
+                  buffer: camera.buffer,
                   selection: isDeveloping ? camera.versionSource : viewing,
                   onSelect: isDeveloping ? selectForVersion : openFromRoll,
                   onToggleFavorite: toggleFavorite,
@@ -737,7 +741,9 @@ struct CameraView: View {
                 }
                 .offset(x: 56)
             } else {
-                ShutterButton(isBusy: camera.isCapturing) { camera.capture() }
+                // Busy only while a frame is coming off the sensor, or once ten
+                // are waiting to be developed — see `CaptureBuffer`.
+                ShutterButton(isBusy: camera.isShutterBusy) { camera.capture() }
 
                 Button {
                     camera.capturePreviewFrame()
@@ -750,7 +756,7 @@ struct CameraView: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(camera.isCapturing)
+                .disabled(camera.isBusy)
                 // Just clear of the shutter's ring, and well clear of the
                 // exposure wheel at the trailing edge.
                 .offset(x: 68)

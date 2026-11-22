@@ -42,6 +42,7 @@ resolution.
 | `Camera/CIImage+Square.swift` | The centred 1:1 crop shared by preview and capture |
 | `Camera/PhotoEncoder.swift` | JPEG encoding, and the settings embedded in EXIF |
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
+| `Camera/CaptureBuffer.swift` | The frames taken faster than they can be developed |
 | `Library/ShotStore.swift` | Every shot on disk |
 | `Library/SnapshotStore.swift` | The frames the app leaves behind when it goes away |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
@@ -181,6 +182,67 @@ flatter than what the preview showed. Raising the slider trades bypass for
 agreement with the preview; 100 is Apple's own rendering. Everything else on
 the list above stays off regardless.
 
+### The shutter waits for the sensor, not the darkroom
+
+A RAW frame is off the sensor in a fraction of a second, and then takes
+several more to become a photograph: demosaiced, graded and encoded at full
+resolution, its negative squared and rewritten, the lot stored and handed to
+the camera roll. The shutter used to wait for all of that, which put several
+seconds between any two photographs whether or not anything was in the way.
+It waits only for the sensor now. The negative is written to
+`Documents/Pending` the moment it arrives, the shutter is free again, and the
+frames behind it are developed one at a time, oldest first, while you carry on
+shooting. What comes out is the same file it always was — the same code
+develops it, only later.
+
+**Ten can be waiting.** With ten undeveloped, the shutter dims the way it used
+to after every press, and comes back as soon as the oldest of them lands — a
+buffer, the way a camera has one. They are developed one at a time because
+developing is GPU work: two at once would not finish sooner, and would hold two
+full-resolution frames in memory instead of one. The buffer's renders ask for a
+lower priority than the preview's, so the viewfinder comes first while the
+buffer empties behind it.
+
+**In the roll, a frame being developed is a square with a ring in it**, in the
+place its thumbnail is going to take, and it turns into the thumbnail when it
+lands. The ring is an estimate rather than a report: a full-resolution
+development says nothing about itself until it is finished, so the ring fills
+over however long the last few frames took, stops just short of full, and waits
+there for the photograph. A frame still waiting its turn shows the ring empty.
+There is nothing to tap or hold on one — no photograph exists yet to open, keep,
+share or delete — and nothing else on the screen says the buffer is in use: the
+roll is where photographs appear, so it is where one that hasn't yet is shown.
+The wall, the viewer and a swipe along the roll find a frame once it has landed
+and not before.
+
+**Only the shutter goes through it** — the ring, either volume button, and
+StreetPad. PS was never slow. The develop panel's **CAPTURE**, **Save Settings**
+and **Capture Version** are made start to finish while you wait, as they always
+were, and they wait for the buffer to be empty before they start, for the same
+reason the buffer develops one frame at a time.
+
+**The negatives are on disk rather than in memory**, because a phone goes into
+a pocket with frames still waiting — that is how a burst ends, not an accident.
+Ten negatives of tens of megabytes held in memory by an app in the background
+is what iOS ends apps for; ten files are not. The GPU is out of reach in the
+background too (see [Why it is done in two halves](#why-it-is-done-in-two-halves)),
+so the buffer stops when the camera stops and starts again once the camera is
+back. A frame caught halfway is developed again from the beginning rather than
+trusted, since a render cut off by the app leaving may come back black. If the
+app is ended outright, whatever is in the folder is developed after the next
+launch — once the camera is up, so a leftover frame never slows a camera reached
+in a hurry.
+
+Each frame belongs to the moment it was taken rather than the moment it landed.
+Its place in the roll and the date in its backup file's name are the press, and
+its coordinate is read as it comes off the sensor: a frame developed a minute
+later on a walk would otherwise be placed a street away. Landing is cheap on
+the screen, too. The store used to read every sidecar back in after every write
+— once as a frame landed and again when the camera roll named it — which went
+unnoticed one photograph at a time and would be a hitch in the viewfinder every
+few seconds while the buffer empties. A frame that lands is now put into the
+list in its place.
+
 ## Every photo carries its settings
 
 Captures are JPEG, and each one is written with the profile that made it in
@@ -198,7 +260,10 @@ load after new knobs are added.
 Every capture is written twice: to the camera roll, and to the app's own store
 in `Documents/Snaps` as a matched `<uuid>.jpg` and `<uuid>.json`. The strip
 along the bottom edge reads the store, which is why it shows only frames Snap
-took. It holds 20 at a time with **Load More** for the rest.
+took. It holds 20 at a time with **Load More** for the rest. A frame the
+shutter has taken and not yet developed holds its place there as a square with
+a ring in it — see [The shutter waits for the sensor, not the
+darkroom](#the-shutter-waits-for-the-sensor-not-the-darkroom).
 
 The strip is laid once, under the action bar, and goes wherever that bar goes —
 the foot of the camera screen, or up under the frame with the sliders beneath
@@ -1118,7 +1183,9 @@ end of the list is the one place that is neither.
 
 Capture and Save both capture, store, and save to the camera roll — the only
 difference is that Save ends at the naming sheet. Both mark the frame as made in
-the develop screen, so the roll shows where it came from.
+the develop screen, so the roll shows where it came from. Neither goes through
+the shutter's buffer: both are made while you wait, and both wait for it to be
+empty before they start.
 
 All three of these were a menu on the action bar before that, and a bar across
 the bottom of the panel before that. A menu is a good place for things that have
@@ -1412,9 +1479,12 @@ where the Phone app would offer Add Number:
 So `3#10#3` is three frames ten seconds apart, the first one three seconds
 after the call — taken at 3, 13 and 23 seconds. The last two can be left off
 and mean zero: `5` is five frames as fast as the camera can take them, starting
-now. An interval shorter than a capture takes means the next frame waits for
-the last to finish rather than being dropped. Anything else — a star, a plus,
-a fourth field — isn't a session, and the call button says so with a knock.
+now. An interval shorter than the camera can manage means the next frame waits
+rather than being dropped — for the last to come off the sensor, or, with ten
+already waiting to be developed, for the buffer to have room (see [The shutter
+waits for the sensor, not the darkroom](#the-shutter-waits-for-the-sensor-not-the-darkroom)).
+Anything else — a star, a plus, a fourth field — isn't a session, and the call
+button says so with a knock.
 
 **The green call button starts it, and pressing it again ends it.** It turns
 red with the handset down while a session runs, the way the button that ends a
@@ -1500,9 +1570,10 @@ goes — but leaves the keypad up, with the number on it, for coming back to.
 
 **The volume buttons take a frame at any point while it is up** — with no
 session going, during the prep, or between a session's frames — and answer
-with the thud. A press that lands while a frame is still being developed waits
-for it rather than being dropped, and a session's schedule doesn't move for it:
-its next frame waits the same way if the pressed one is still going. See also
+with the thud. A press that lands while the last frame is still coming off the
+sensor, or while the buffer is full, waits rather than being dropped, and a
+session's schedule doesn't move for it: its next frame waits the same way if
+the shutter is still busy when it falls due. See also
 [The volume buttons](#the-volume-buttons).
 
 ### The keypad itself

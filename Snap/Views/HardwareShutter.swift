@@ -81,7 +81,7 @@ struct HardwareShutter: UIViewRepresentable {
 
                 // The queue these arrive on isn't promised, and everything a
                 // press leads to — the haptic, the shutter flash, the published
-                // `isCapturing` — belongs to the main thread.
+                // capture state — belongs to the main thread.
                 DispatchQueue.main.async { self?.action() }
             }
 

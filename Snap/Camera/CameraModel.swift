@@ -26,7 +26,16 @@ final class CameraModel: NSObject, ObservableObject {
     // MARK: - Published state
 
     @Published private(set) var state: State = .starting
+    /// A capture that doesn't go through the buffer — PS, a version, the
+    /// develop panel's own — is being made, start to finish.
     @Published private(set) var isCapturing = false
+    /// A frame is on the sensor: from the press until its data is in hand
+    /// (and, for the shutter's frames, on disk in the buffer).
+    @Published private(set) var isExposing = false
+    /// How many of the shutter's frames are waiting to be developed. Mirrors
+    /// the buffer's count, so the screen redraws when it changes and not on
+    /// every turn of a ring.
+    @Published private(set) var bufferedCount = 0
     @Published private(set) var isShutterFlashing = false
     @Published var errorMessage: String? = nil
 
@@ -55,6 +64,21 @@ final class CameraModel: NSObject, ObservableObject {
     /// The frames left frozen on screen by walking away. Kept apart from the
     /// roll and never sent to the camera roll — see `SnapshotStore`.
     let snapshots = SnapshotStore()
+
+    /// The shutter's frames between the sensor and the roll — see
+    /// `CaptureBuffer`.
+    let buffer = CaptureBuffer()
+
+    /// A frame is on the sensor, or a capture outside the buffer is being made.
+    var isBusy: Bool { isExposing || isCapturing }
+
+    /// The shutter can't take another frame yet: the last one is still coming
+    /// off the sensor, or the buffer is full.
+    var isShutterBusy: Bool { isBusy || bufferedCount >= CaptureBuffer.capacity }
+
+    /// The panel's captures and a version wait for this to be false, so that
+    /// two full-resolution developments never run at once.
+    var hasBufferedFrames: Bool { bufferedCount > 0 }
 
     /// Set once the session is configured: true when the sensor can hand us
     /// Bayer RAW.
@@ -249,9 +273,15 @@ final class CameraModel: NSObject, ObservableObject {
     private var rawPixelFormat: OSType?
 
     /// Whether the capture in flight should end at the naming sheet.
-    /// Only one capture runs at a time (`isCapturing` guards it), so a single
-    /// slot is enough.
+    /// Only one frame is on the sensor at a time (`isExposing` guards it), and
+    /// each of these is read off as that frame arrives, before the shutter is
+    /// let go — so a single slot is enough, buffer or no buffer.
     private var wantsTitle = false
+    /// Whether the frame on the sensor goes into the buffer when it arrives.
+    private var exposureIsBuffered = false
+    /// The moment of the press. A buffered frame lands seconds later, and its
+    /// place in the roll is when it was taken, not when it was developed.
+    private var capturedAt = Date()
     /// The profile as it stood when the shutter fired, so later slider moves
     /// can't change what gets written.
     private var capturedProfile = PositiveFilmProfile()
@@ -262,6 +292,11 @@ final class CameraModel: NSObject, ObservableObject {
     private var capturedOrigin: Shot.Origin = .camera
 
     private let stillContext = CIContext(options: [.cacheIntermediates: false])
+    /// The buffer's own, asking for a lower priority than the preview's renders
+    /// get, so that the viewfinder comes first while frames are developed
+    /// behind the shooting.
+    private let bufferContext = CIContext(options: [.cacheIntermediates: false,
+                                                    .priorityRequestLow: true])
     private let library = PhotoLibrarySaver()
 
     /// Where the phone is, for the GPS block AVFoundation never writes.
@@ -279,6 +314,12 @@ final class CameraModel: NSObject, ObservableObject {
         lookRevisionObserver = look.$revision
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshVersionPreview() }
+
+        buffer.developer = self
+        buffer.$frames
+            .map(\.count)
+            .removeDuplicates()
+            .assign(to: &$bufferedCount)
     }
 
     // MARK: - Lifecycle
@@ -301,6 +342,9 @@ final class CameraModel: NSObject, ObservableObject {
 
     func stop() {
         locationTagger.stop()
+        // The camera stops on the way to the background, which is where the
+        // GPU goes too. Frames still waiting are developed when it comes back.
+        buffer.suspend()
 
         sessionQueue.async { [weak self] in
             guard let self, self.session.isRunning else { return }
@@ -332,6 +376,9 @@ final class CameraModel: NSObject, ObservableObject {
                 self.session.startRunning()
             }
             self.setState(.running)
+            // Only once the camera is up, so that a frame left over from a run
+            // that was ended doesn't slow the camera's own start.
+            self.buffer.resume()
         }
     }
 
@@ -874,12 +921,27 @@ final class CameraModel: NSObject, ObservableObject {
     /// settings in EXIF, saved to the camera roll, and recorded in the store.
     /// `titled` only decides whether the naming sheet follows, and `origin`
     /// only marks where the shot came from for the strip.
+    ///
+    /// The shutter's frames — the ring, the volume buttons, StreetPad — go
+    /// through the buffer, and the shutter is free again as soon as the frame
+    /// is off the sensor. The develop panel's captures don't: they are made
+    /// start to finish while you wait, as they always were, and wait for the
+    /// buffer to be empty before they start.
     func capture(titled: Bool = false, origin: Shot.Origin = .camera) {
-        guard state == .running, !isCapturing else { return }
-        isCapturing = true
+        let isBuffered = !titled && origin == .camera
+        guard state == .running else { return }
+        if isBuffered {
+            guard !isShutterBusy else { return }
+        } else {
+            guard !isBusy, !hasBufferedFrames else { return }
+            isCapturing = true
+        }
+        isExposing = true
+        exposureIsBuffered = isBuffered
         wantsTitle = titled
         capturedOrigin = origin
         capturedProfile = look.profile
+        capturedAt = Date()
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
@@ -1109,7 +1171,7 @@ final class CameraModel: NSObject, ObservableObject {
     func captureVersion(titled: Bool = false) {
         guard let shot = versionSource,
               let rawURL = store.rawURL(for: shot),
-              !isCapturing else { return }
+              !isBusy, !hasBufferedFrames else { return }
 
         isCapturing = true
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -1249,7 +1311,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// at preview size rather than sensor size, and there is no negative
     /// behind it.
     func capturePreviewFrame() {
-        guard state == .running, !isCapturing, let image = renderer.currentImage else { return }
+        // Not held up by the buffer: PS develops nothing, and its preview-sized
+        // encode is nothing beside a frame being developed behind it.
+        guard state == .running, !isBusy, let image = renderer.currentImage else { return }
         isCapturing = true
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1381,6 +1445,147 @@ final class CameraModel: NSObject, ObservableObject {
             }
         }
     }
+
+    /// The sensor is free. For a buffered frame this is the shutter coming
+    /// back; anything else still has `isCapturing` to clear.
+    ///
+    /// Hops to the main thread after the buffer's own hop that adds the frame's
+    /// square, so the count the shutter checks has already gone up by the time
+    /// it can be pressed again.
+    private func finishExposure() {
+        DispatchQueue.main.async { [weak self] in
+            self?.isExposing = false
+        }
+    }
+
+    /// A frame that never arrived. Nothing reached the buffer, so a buffered
+    /// one has only the shutter to give back.
+    private func failExposure(_ message: String, isBuffered: Bool) {
+        finishExposure()
+        if isBuffered {
+            reportError(message)
+        } else {
+            finishCapture(error: message)
+        }
+    }
+
+    private func reportError(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.errorMessage = message
+        }
+    }
+
+    // MARK: - Developing
+
+    /// Develops, crops, grades and encodes a frame off the sensor: the half of
+    /// a capture that reaches for the GPU. Shared by a capture made while you
+    /// wait and one the buffer develops later, so the two are the same file.
+    private func renderJPEG(from data: Data,
+                            isRAW: Bool,
+                            metadata: [String: Any],
+                            profile: PositiveFilmProfile,
+                            context: CIContext) throws -> Data {
+        // A RAW capture is demosaiced here rather than by Apple, so the look
+        // lands on sensor data instead of on their finished JPEG.
+        let upright: CIImage
+        if isRAW {
+            upright = try RAWDeveloper.develop(
+                dngData: data,
+                profile: profile,
+                orientation: RAWDeveloper.orientation(from: metadata)
+            )
+        } else {
+            guard let decoded = CIImage(data: data,
+                                        options: [.applyOrientationProperty: true]) else {
+                throw RAWDeveloper.DevelopError.undecodable
+            }
+            upright = decoded
+        }
+
+        // Same crop, same look, same order as the preview — just at full size,
+        // and always through a full-resolution LUT even if the preview was
+        // running on a draft one mid-drag.
+        let graded = look.finalFilter(for: profile)
+            .apply(to: upright.centerSquareCropped())
+
+        return try PhotoEncoder.jpeg(from: graded,
+                                     profile: profile,
+                                     sourceMetadata: metadata,
+                                     context: context)
+    }
+
+    /// The other half: squares the negative and records the shot. Files only.
+    ///
+    /// The negative is kept in the app's store, where the strip can share it.
+    /// Only the graded frame goes to the camera roll.
+    private func fileShot(jpeg: Data,
+                          negative data: Data,
+                          isRAW: Bool,
+                          profile: PositiveFilmProfile,
+                          origin: Shot.Origin,
+                          id: UUID = UUID(),
+                          createdAt: Date = Date()) throws -> Shot {
+        var negative: Data?
+        var xmp: String?
+
+        if isRAW {
+            let prepared = prepareNegative(data, profile: profile)
+            negative = prepared.data
+            xmp = prepared.xmp
+        }
+
+        return try store.add(id: id,
+                             createdAt: createdAt,
+                             imageData: jpeg,
+                             rawData: negative,
+                             xmp: xmp,
+                             origin: origin,
+                             profile: profile)
+    }
+}
+
+// MARK: - The buffer
+
+extension CameraModel: BufferDeveloper {
+
+    /// Through the buffer's own context, at the lower priority.
+    func develop(_ negative: CaptureBuffer.Negative) throws -> Data {
+        try renderJPEG(from: negative.data,
+                       isRAW: negative.isRAW,
+                       metadata: negative.metadata,
+                       profile: negative.profile,
+                       context: bufferContext)
+    }
+
+    /// Filed under the id its square in the roll has had all along, so the
+    /// thumbnail takes the square's place rather than arriving beside it, and
+    /// dated by the press.
+    ///
+    /// The camera roll isn't waited for. The next frame can start developing
+    /// while Photos takes this one.
+    func finish(_ negative: CaptureBuffer.Negative, jpeg: Data) throws {
+        let shot = try fileShot(jpeg: jpeg,
+                                negative: negative.data,
+                                isRAW: negative.isRAW,
+                                profile: negative.profile,
+                                origin: .camera,
+                                id: negative.id,
+                                createdAt: negative.takenAt)
+
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let identifier = try await self.library.save(jpeg)
+                self.store.setAssetIdentifier(identifier, for: shot)
+            } catch {
+                self.reportError(error.localizedDescription)
+            }
+        }
+    }
+
+    func report(_ error: Error) {
+        reportError(error.localizedDescription)
+    }
 }
 
 // MARK: - Live preview
@@ -1421,69 +1626,57 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput,
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
+        let isBuffered = exposureIsBuffered
+
         if let error {
-            finishCapture(error: error.localizedDescription)
+            failExposure(error.localizedDescription, isBuffered: isBuffered)
             return
         }
 
         guard let data = photo.fileDataRepresentation() else {
-            finishCapture(error: "The photo could not be read.")
+            failExposure("The photo could not be read.", isBuffered: isBuffered)
             return
         }
 
         let profile = capturedProfile
         let origin = capturedOrigin
-        let sourceMetadata = photo.metadata
+        let takenAt = capturedAt
+        // The coordinate is read now, as the frame comes off the sensor. A
+        // buffered frame can be developed a minute later and a street away.
+        let metadata = placed(photo.metadata)
         let isRAW = photo.isRawPhoto
         let wantsTitle = self.wantsTitle
+
+        if isBuffered {
+            do {
+                try buffer.admit(data: data,
+                                 isRAW: isRAW,
+                                 metadata: metadata,
+                                 profile: profile,
+                                 takenAt: takenAt)
+            } catch {
+                reportError(error.localizedDescription)
+            }
+            finishExposure()
+            return
+        }
+
+        finishExposure()
 
         Task { [weak self] in
             guard let self else { return }
             do {
-                // A RAW capture is demosaiced here rather than by Apple, so the
-                // look lands on sensor data instead of on their finished JPEG.
-                let upright: CIImage
-                if isRAW {
-                    upright = try RAWDeveloper.develop(
-                        dngData: data,
-                        profile: profile,
-                        orientation: RAWDeveloper.orientation(from: sourceMetadata)
-                    )
-                } else {
-                    guard let decoded = CIImage(data: data,
-                                                options: [.applyOrientationProperty: true]) else {
-                        throw RAWDeveloper.DevelopError.undecodable
-                    }
-                    upright = decoded
-                }
-
-                // Same crop, same look, same order as the preview — just at
-                // full size, and always through a full-resolution LUT even if
-                // the preview was running on a draft one mid-drag.
-                let graded = self.look.finalFilter(for: profile)
-                    .apply(to: upright.centerSquareCropped())
-
-                let jpeg = try PhotoEncoder.jpeg(from: graded,
-                                                 profile: profile,
-                                                 sourceMetadata: self.placed(sourceMetadata),
-                                                 context: self.stillContext)
-
-                // The negative is kept in the app's store, where the strip
-                // can share it. Only the graded frame goes to the camera roll.
-                var negative: Data?
-                var xmp: String?
-
-                if isRAW {
-                    let prepared = self.prepareNegative(data, profile: profile)
-                    negative = prepared.data
-                    xmp = prepared.xmp
-                }
-
-                let shot = try self.store.add(imageData: jpeg,
-                                              rawData: negative,
-                                              xmp: xmp,
-                                              origin: origin,
-                                              profile: profile)
+                let jpeg = try self.renderJPEG(from: data,
+                                               isRAW: isRAW,
+                                               metadata: metadata,
+                                               profile: profile,
+                                               context: self.stillContext)
+                let shot = try self.fileShot(jpeg: jpeg,
+                                             negative: data,
+                                             isRAW: isRAW,
+                                             profile: profile,
+                                             origin: origin,
+                                             createdAt: takenAt)
                 let identifier = try await self.library.save(jpeg)
                 self.store.setAssetIdentifier(identifier, for: shot)
 

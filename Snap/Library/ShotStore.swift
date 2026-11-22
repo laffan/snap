@@ -108,15 +108,21 @@ final class ShotStore: ObservableObject {
 
     /// Records a capture. Safe to call off the main thread — the file work
     /// happens on the caller's thread and only the published list hops back.
+    ///
+    /// `id` and `createdAt` are the buffer's: a frame it developed is filed
+    /// under the id its square in the roll already had, and dated by the press
+    /// rather than by when it was finished.
     @discardableResult
-    func add(imageData: Data,
+    func add(id: UUID = UUID(),
+             createdAt: Date = Date(),
+             imageData: Data,
              rawData: Data?,
              xmp: String?,
              origin: Shot.Origin,
              profile: PositiveFilmProfile) throws -> Shot {
-        let id = UUID()
         // Adobe looks for the sidecar under the negative's own base name.
         let shot = Shot(id: id,
+                        createdAt: createdAt,
                         imageFileName: "\(id.uuidString).jpg",
                         rawFileName: rawData == nil ? nil : "\(id.uuidString).dng",
                         xmpFileName: (rawData == nil || xmp == nil) ? nil : "\(id.uuidString).xmp",
@@ -135,7 +141,7 @@ final class ShotStore: ObservableObject {
                           encoding: .utf8)
         }
         try writeSidecar(shot)
-        publishReload()
+        publish(shot)
         return shot
     }
 
@@ -215,11 +221,16 @@ final class ShotStore: ObservableObject {
     /// is holding: a view can be showing a `Shot` from before a capture wrote
     /// its asset identifier, and writing that copy back would drop the newer
     /// field.
+    ///
+    /// A shot with nothing on disk has been deleted, and is left that way. The
+    /// camera roll naming a frame lands a moment after the frame itself, and
+    /// one deleted in that moment would otherwise come back as a sidecar with
+    /// no photograph.
     private func mutate(_ shot: Shot, _ change: (inout Shot) -> Void) {
-        var current = storedShot(id: shot.id) ?? shot
+        guard var current = storedShot(id: shot.id) else { return }
         change(&current)
         try? writeSidecar(current)
-        publishReload()
+        publish(current)
     }
 
     private func storedShot(id: UUID) -> Shot? {
@@ -239,6 +250,31 @@ final class ShotStore: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         try encoder.encode(shot).write(to: sidecarURL(for: shot))
+    }
+
+    /// Puts one shot into the published list, or replaces it there, without
+    /// reading the whole directory back.
+    ///
+    /// A reload reads every sidecar in the store on the main thread, and it
+    /// used to follow every write — once as a frame landed and again when the
+    /// camera roll named it. One photograph at a time that went unnoticed.
+    /// With the buffer landing a frame every few seconds under somebody who is
+    /// still shooting, it would be a hitch in the viewfinder each time.
+    private func publish(_ shot: Shot) {
+        let apply = { [weak self] in
+            guard let self else { return }
+            var shots = self.shots
+            shots.removeAll { $0.id == shot.id }
+            let index = shots.firstIndex { $0.createdAt < shot.createdAt } ?? shots.endIndex
+            shots.insert(shot, at: index)
+            self.shots = shots
+        }
+
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
     }
 
     private func publishReload() {
