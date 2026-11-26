@@ -43,6 +43,10 @@ resolution.
 | `Camera/PhotoEncoder.swift` | JPEG encoding, and the settings embedded in EXIF |
 | `Camera/RAWDeveloper.swift` | Demosaics RAW with Apple's processing switched off |
 | `Camera/CaptureBuffer.swift` | The frames taken faster than they can be developed |
+| `Camera/LongExposure.swift` | A long exposure in as many frames as fit in it, and how they are exposed |
+| `Camera/BayerStack.swift` | Those frames added up, photosite by photosite |
+| `Camera/DNGRaw.swift` | The sensor image inside a DNG, read back and replaced |
+| `Camera/LosslessJPEG.swift` | The lossless JPEG Apple writes a negative's tiles in |
 | `Library/ShotStore.swift` | Every shot on disk |
 | `Library/SnapshotStore.swift` | The frames the app leaves behind when it goes away |
 | `Views/FilmStrip.swift` | The app's own roll along the bottom edge |
@@ -243,6 +247,125 @@ unnoticed one photograph at a time and would be a hitch in the viewfinder every
 few seconds while the buffer empties. A frame that lands is now put into the
 list in its place.
 
+## Long exposure
+
+**The hourglass after the macro flower** turns the shutter into a long one.
+While it is lit, the wheel beside the frame stops being exposure compensation
+and becomes how long the shutter stays open: two seconds to thirty, a click a
+second, a number every five. Double-tapping it puts it back to ten. Press the
+shutter and the number beside the pointer counts down while the shutter dims;
+when it reaches the end, the frame goes into the buffer and arrives in the roll
+as a ring, like any other.
+
+### Why it is many frames
+
+iOS will not hold a shutter open for longer than the active format's
+`maxExposureDuration`, which on a recent iPhone is about a second and on an
+older one a third. Apple's own Night mode gets to ten or thirty seconds the same
+way this does — a burst of shorter frames, put together — and is not open to
+other apps. So ten seconds is ten one-second frames, back to back.
+
+The gap between them is however long a RAW capture takes to turn round — a
+fraction of a second, and how large a fraction depends on the phone — and the
+light in it is lost. Adding each frame to the stack happens behind the shooting
+rather than in front of it, so the time that takes isn't added to the gap. The dial counts the time from the first frame opening, and
+another frame is taken while most of it would still fit.
+
+### What the frames are exposed at
+
+The meter's, unless a pin says otherwise. In auto, the light the meter wants is
+taken as one quantity — shutter times ISO, corrected by how far the meter says
+it is off — and spread over the longest frame the format allows at the lowest
+ISO that gets there. A dark street that auto had at 1/8 and ISO 2000, a stop
+under, becomes one-second frames at ISO 500: the right light this time,
+collected slowly rather than amplified, which is less noise before a single
+frame has been added. With either pin set the frames are what the photographer chose, and the half
+that isn't pinned stays wherever the priority mode was holding it.
+
+Compensation is held at zero on the device while the hourglass is lit, and comes
+back when it goes out. A compensation nobody can see on the screen is not one
+anybody chose. The lens, macro and the hourglass itself hold still while an
+exposure is open, and so do the priority modes' corrections: the frames are
+added photosite by photosite, and a frame through other glass, or at another
+exposure, is a different photograph.
+
+**Ten seconds is not ten times brighter.** The frame comes out as bright as the
+meter asked for, the way a Night mode photograph does. What the extra time buys
+is the other two things a long exposure is for: the noise goes down by the
+square root of how many frames there were — sixteen frames is a quarter of the
+noise, two stops cleaner — and anything that moves is smoothed across the time
+on the dial.
+
+### Where they are added
+
+Before anything else has happened to them. A negative is one number per
+photosite — how much light reached it, plus the sensor's black level — and
+adding frames there is adding light. It happens before demosaicing, white
+balance or a tone curve has made a decision that adding afterwards would have to
+undo. What comes out is the average, put back on the scale the frames were on,
+so it can go into a DNG as if the sensor had produced it. Each frame counts for
+the light it was set to collect, read back out of its own EXIF, so a frame the
+system exposed differently from the plan is weighted for what it got. The
+running total is one float per photosite, 48 MB whatever the number of frames,
+and each frame is let go as soon as it has been added.
+
+The frames are added from the pixel buffers AVFoundation hands over, which are
+the sensor data before anything has packaged it. Nothing promises those hold
+exactly the numbers the DNG does, so the first frame is checked. One tile of its
+DNG is decoded — Apple writes them in lossless JPEG, which is what
+`LosslessJPEG` reads — and compared with the same corner of its buffer,
+photosite by photosite. If they disagree the frames aren't added: the first one
+is kept as an ordinary photograph, and the reason is said.
+
+### The negative it makes
+
+The merge is written into the first frame's own DNG rather than into a new one.
+ImageIO will not take new sensor data, and the rest of an iPhone negative — its
+colour matrices, the lens corrections Apple keeps in its opcode lists, its noise
+profile, the maker notes — is still true of the merge, and is exactly the part
+nobody could be sure of writing again correctly. So the merged image goes in
+uncompressed, as the same tiles in the same order, appended to the end of the
+file with the tile table pointed at them. Apple's compressed tiles stay where
+they were, referenced by nothing.
+
+Four other things change. The raw-image digests are switched off rather than
+left wrong, since a converter that checks them would call the file damaged.
+`RawDataUniqueID` is new, so a converter's cache doesn't take the merge for the
+first frame. `ExposureTime` is the time the run spans, in the DNG and in the
+JPEG, which is what the frame's readout shows — **10s**, beside the frames'
+own ISO. And the noise
+profile is divided by the number of frames, since that is what averaging did to
+the noise, so a converter's noise reduction knows there is less of it.
+
+From there it is a negative like any other: the buffer develops it, the sliders
+re-develop it, Share RAW sends it and Lightroom opens it. It is bigger than one,
+at about 35 MB rather than ten, because of the uncompressed tiles. The preview
+embedded in the DNG is still the first frame's, so whatever shows a DNG by its
+embedded preview rather than by developing it shows one frame.
+
+### What it doesn't do
+
+**Hold the camera still.** The frames are added where they fall, with nothing
+aligned, so this is for a tripod or a wall. Pressing the shutter shakes a phone
+on a tripod, and the first frame opens almost at once. A volume button shakes it
+less, and StreetPad's lead-in is a self-timer: `1#0#3` is one long exposure,
+three seconds after the call button.
+
+**Make daylight slow.** In bright light the meter's frames are short, and the
+run still lasts the time on the dial but only collects light while a frame is
+open. Water in sunlight comes out as an average of a few hundred moments rather
+than as a smear. A neutral-density filter is the only thing that makes daylight
+take a second, and there isn't one in software.
+
+**Draw bright light trails.** A car's lights pass over each part of the road for
+a fraction of the run, and an average gives them that fraction: a faint streak
+rather than a bright one. A lighten blend, keeping each photosite's brightest
+frame, is what makes trails bright, and it is not here yet.
+
+**Anything but the shutter.** The ring, either volume button and StreetPad take
+long exposures. PS and the develop panel's **CAPTURE** stay single frames, since
+they are made while you wait.
+
 ## Every photo carries its settings
 
 Captures are JPEG, and each one is written with the profile that made it in
@@ -289,6 +412,11 @@ dot — the ultra wide's included — ends it, since a lens chosen by hand is
 wanted as it comes. Phones whose ultra wide is fixed focus don't draw it. The dots and the flower
 are centred under the shutter as one row.
 
+**An hourglass sits after the flower**, in one more cell, wherever the sensor
+can give Bayer RAW. It is long exposure, and it is described under [Long
+exposure](#long-exposure): lit in the accent while it is on, and while it is on
+the wheel beside the frame is a timer.
+
 The one thing Apple's version does that this doesn't is crop: the Camera app
 trims the ultra wide down to the wide's field of view, so going macro doesn't
 seem to change lens. Here a crop would be a zoom, which is on the list of
@@ -303,7 +431,9 @@ per third, the whole stops numbered on it, and a fixed pointer at its middle
 with the exact setting beside it. Dragging up or down turns it — up is more
 light — clicking at each third, and it settles on the nearest one when you let
 go. The pointer goes yellow while it is anything but zero. Double-tapping it
-puts it back to zero, as double-tapping does for a slider. It tells the meter
+puts it back to zero, as double-tapping does for a slider. With long exposure
+on it is the same wheel marked in seconds instead — see [Long
+exposure](#long-exposure). It tells the meter
 where to aim rather than darkening the picture afterwards: a third of a stop
 under and the sensor takes in a third of a stop less light, in auto and in
 either priority alike, since both steer by the meter. Apple records it in the

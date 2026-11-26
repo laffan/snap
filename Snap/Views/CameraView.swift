@@ -955,16 +955,17 @@ struct CameraView: View {
                        subProfiles: shot.profile.activeSubProfiles)
     }
 
-    /// One dot per lens, widening left to right the way the lenses do, and
-    /// the macro flower after them, centred under the shutter together. Hidden on a single-camera device, where there is
-    /// nothing to choose.
+    /// One dot per lens, widening left to right the way the lenses do, then
+    /// the macro flower and the long-exposure hourglass, centred under the
+    /// shutter together. The dots are hidden on a single-camera device, where
+    /// there is nothing to choose; the hourglass stays wherever there is RAW.
     @ViewBuilder
     private var lensPicker: some View {
-        if camera.lenses.count > 1 {
-            // The dots and the flower are centred as one row, the flower
-            // counted as a fourth stop along it.
+        if camera.lenses.count > 1 || camera.isLongExposureAvailable {
+            // The dots, the flower and the hourglass are centred as one row,
+            // each of the last two counted as one more stop along it.
             HStack(spacing: 0) {
-                ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
+                ForEach(Array(selectableLenses.enumerated()), id: \.element.id) { index, lens in
                     let diameter = 7 + CGFloat(index) * 3.5
                     let isCurrent = lens == camera.currentLens
 
@@ -992,8 +993,19 @@ struct CameraView: View {
                 if camera.isMacroAvailable {
                     macroToggle
                 }
+
+                // And one more after that: like macro, it decides how the next
+                // photograph is taken rather than which glass it goes through.
+                if camera.isLongExposureAvailable {
+                    longExposureToggle
+                }
             }
         }
+    }
+
+    /// The lenses worth a dot: none at all when there is only one.
+    private var selectableLenses: [CameraModel.Lens] {
+        camera.lenses.count > 1 ? camera.lenses : []
     }
 
     /// The width each lens dot is given to be tapped in, and the flower after
@@ -1017,6 +1029,27 @@ struct CameraView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Macro")
         .accessibilityValue(camera.isMacroOn ? "On" : "Off")
+    }
+
+    /// An hourglass, lit in the accent while long exposure is on. On, the
+    /// wheel at the right of the shutter becomes the time the shutter stays
+    /// open, and the shutter takes that long. Held still while one is being
+    /// taken, since the run is already using what it set.
+    private var longExposureToggle: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            camera.toggleLongExposure()
+        } label: {
+            Image(systemName: "hourglass")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(camera.isLongExposureOn ? Color.snapAccent : .white.opacity(0.55))
+                .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(camera.isExposing)
+        .accessibilityLabel("Long exposure")
+        .accessibilityValue(camera.isLongExposureOn ? "On" : "Off")
     }
 
     @ViewBuilder
@@ -1375,6 +1408,7 @@ struct CameraView: View {
         camera.endVersioning()
         camera.releaseExposure()
         camera.exposureBias = 0
+        camera.endLongExposure()
         camera.releaseFocus()
         camera.selectDefaultLens()
         // Black and white stays: it is a standing choice that survives a
@@ -1660,12 +1694,38 @@ private struct SubProfileToggles: View {
 ///
 /// Thirds of a stop across ±3, the step and the reach of a camera's dial: a
 /// whole stop is too coarse to set a highlight by.
+///
+/// With long exposure on, the same wheel is its timer instead: two seconds to
+/// thirty, in whole seconds. Compensation has no place there — the frames are
+/// exposed where the meter puts them — and the dial is the one control on the
+/// screen already shaped like something that is turned to a length of time.
 private struct ExposureControl: View {
 
     @ObservedObject var camera: CameraModel
 
     var body: some View {
-        ExposureWheel(value: $camera.exposureBias, range: -3...3, step: 1.0 / 3)
+        if camera.isLongExposureOn {
+            LongExposureDial(camera: camera, clock: camera.longExposureClock)
+        } else {
+            ExposureWheel(value: $camera.exposureBias, scale: .compensation)
+        }
+    }
+}
+
+/// The wheel in seconds. While an exposure is open its readout counts down,
+/// and the rim is held where it was set: the time being taken is the time on
+/// the dial.
+private struct LongExposureDial: View {
+
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var clock: LongExposureClock
+
+    var body: some View {
+        ExposureWheel(value: Binding(get: { Float(camera.longExposureSeconds) },
+                                     set: { camera.longExposureSeconds = Int($0.rounded()) }),
+                      scale: .seconds,
+                      countdown: clock.remaining)
+            .allowsHitTesting(!camera.isExposing)
     }
 }
 

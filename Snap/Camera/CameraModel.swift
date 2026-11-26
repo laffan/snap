@@ -119,6 +119,24 @@ final class CameraModel: NSObject, ObservableObject {
     /// What macro goes back to when it is switched off.
     private var lensBeforeMacro: Lens?
 
+    /// The hourglass after the macro flower: the shutter takes one long
+    /// exposure, made of as many frames as fit in the time on the dial. See
+    /// `LongExposure`.
+    @Published private(set) var isLongExposureOn = false
+
+    /// What the dial says while long exposure is on, in seconds.
+    @Published var longExposureSeconds = LongExposure.defaultSeconds
+
+    /// The countdown while one is being taken.
+    let longExposureClock = LongExposureClock()
+
+    /// The long exposure being taken, held until it lands. The photo output
+    /// holds its delegates weakly, so this is what keeps the run alive.
+    private var longExposureRun: LongExposureRun?
+
+    /// Frames are added together as sensor data, so it needs Bayer RAW.
+    var isLongExposureAvailable: Bool { isRAWAvailable }
+
     /// A stored negative being re-filtered in place of the live camera.
     @Published private(set) var versionSource: Shot? = nil
 
@@ -179,6 +197,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// it moves where the EV readout's zero is and nothing else, the way
     /// compensation does on any camera in manual. Apple writes it into the
     /// capture's EXIF as `ExposureBiasValue`.
+    ///
+    /// While long exposure is on, the wheel is its timer rather than this, so
+    /// the device is held at zero — a compensation nobody can see is not one
+    /// anybody chose — and the setting comes back when long exposure goes off.
     @Published var exposureBias: Float = 0 {
         didSet { if exposureBias != oldValue { applyExposureBias() } }
     }
@@ -606,7 +628,7 @@ final class CameraModel: NSObject, ObservableObject {
     ///
     /// Held per device, so a lens swap has to send it again.
     private func applyExposureBias() {
-        let bias = exposureBias
+        let bias = isLongExposureOn ? 0 : exposureBias
 
         sessionQueue.async { [weak self] in
             guard let device = self?.videoDevice else { return }
@@ -665,6 +687,10 @@ final class CameraModel: NSObject, ObservableObject {
     /// reading; with neither, the device is metering for itself.
     private func correctExposure(by offset: Float) {
         guard abs(offset) > 0.12 else { return }
+        // A long exposure's frames are all taken at the one exposure it
+        // planned; nudging it between frames would only have to be undone in
+        // the merge.
+        guard longExposureRun == nil else { return }
 
         switch exposureMode {
         case .shutterPriority: correctISO(by: offset)
@@ -789,6 +815,9 @@ final class CameraModel: NSObject, ObservableObject {
     ///
     /// Off goes back to whichever lens was up when it went on.
     func toggleMacro() {
+        // Not mid-exposure: the frames are added photosite by photosite, and
+        // a frame through other glass is a different photograph.
+        guard longExposureRun == nil else { return }
         if isMacroOn {
             let back = lensBeforeMacro
                 ?? lenses.first { $0.deviceType == .builtInWideAngleCamera }
@@ -842,8 +871,33 @@ final class CameraModel: NSObject, ObservableObject {
     /// which glass is in use, and choosing one — the ultra wide included —
     /// means wanting it as it comes.
     func selectLens(_ lens: Lens) {
+        guard longExposureRun == nil else { return }
         endMacro()
         switchLens(to: lens)
+    }
+
+    // MARK: - Long exposure
+
+    /// Long exposure on or off. Not while one is being taken.
+    ///
+    /// On makes the wheel a timer and the shutter a long exposure; it doesn't
+    /// touch the lens, the pins or the look, so it combines with all of them.
+    func toggleLongExposure() {
+        guard longExposureRun == nil else { return }
+        if isLongExposureOn {
+            endLongExposure()
+        } else {
+            guard isLongExposureAvailable else { return }
+            isLongExposureOn = true
+            applyExposureBias()
+        }
+    }
+
+    /// Back to the ordinary shutter, and the wheel back to compensation.
+    func endLongExposure() {
+        guard isLongExposureOn, longExposureRun == nil else { return }
+        isLongExposureOn = false
+        applyExposureBias()
     }
 
     /// Swaps the session's input. RAW support is per-lens, so it is resolved
@@ -912,6 +966,9 @@ final class CameraModel: NSObject, ObservableObject {
         rawPixelFormat = bayerFormat
         DispatchQueue.main.async { [weak self] in
             self?.isRAWAvailable = bayerFormat != nil
+            // A lens without Bayer RAW can't take a long exposure, so arriving
+            // on one puts the ordinary shutter and the compensation back.
+            if bayerFormat == nil { self?.endLongExposure() }
         }
     }
 
@@ -930,6 +987,13 @@ final class CameraModel: NSObject, ObservableObject {
     func capture(titled: Bool = false, origin: Shot.Origin = .camera) {
         let isBuffered = !titled && origin == .camera
         guard state == .running else { return }
+        // The shutter's frames, and only those, become long exposures. The
+        // develop panel's own captures stay single frames: they are made while
+        // you wait, and half a minute is a long time to wait at a slider.
+        if isBuffered, isLongExposureOn, isLongExposureAvailable {
+            captureLongExposure()
+            return
+        }
         if isBuffered {
             guard !isShutterBusy else { return }
         } else {
@@ -986,6 +1050,125 @@ final class CameraModel: NSObject, ObservableObject {
             settings.isShutterSoundSuppressionEnabled = true
         }
         return settings
+    }
+
+    /// One long exposure, in as many frames as fit in the time on the dial.
+    ///
+    /// The shutter is busy from the press until the merged negative is in the
+    /// buffer, and then it is a frame like any other: developed behind the
+    /// shooting, filed in the roll at the moment of the press. The device is
+    /// held at the plan's exposure for the length of the run and handed back to
+    /// the pins, or to the camera, once it ends.
+    private func captureLongExposure() {
+        guard !isShutterBusy, isLongExposureAvailable else { return }
+        isExposing = true
+
+        let profile = look.profile
+        let takenAt = Date()
+        let seconds = longExposureSeconds
+        let pinnedShutter = shutterSpeed?.duration
+        let pinnedISO = iso
+        // Read now, at the press, like every capture's.
+        let angle = captureRotationAngle
+
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        flashShutter()
+
+        let run = LongExposureRun(
+            seconds: TimeInterval(seconds),
+            request: { [weak self] run in
+                self?.sessionQueue.async { [weak self] in
+                    guard let self, let format = self.rawPixelFormat else {
+                        run.abandon("The camera can't take RAW frames now.")
+                        return
+                    }
+                    self.photoOutput.capturePhoto(with: self.makeLongExposureSettings(format),
+                                                  delegate: run)
+                }
+            },
+            opened: { [weak self] in
+                DispatchQueue.main.async { self?.longExposureClock.start(seconds: seconds) }
+            },
+            completion: { [weak self] result in
+                self?.finishLongExposure(result, profile: profile, takenAt: takenAt)
+            })
+        longExposureRun = run
+
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoDevice else {
+                run.abandon("The camera isn't available.")
+                return
+            }
+            self.applyCaptureRotation(angle)
+
+            let plan = LongExposure.plan(for: device,
+                                         total: TimeInterval(seconds),
+                                         pinnedShutter: pinnedShutter,
+                                         pinnedISO: pinnedISO)
+
+            // The first frame waits for the device to be exposing at the plan,
+            // which is what the completion handler says.
+            guard device.isExposureModeSupported(.custom),
+                  (try? device.lockForConfiguration()) != nil else {
+                run.start(frameSeconds: CMTimeGetSeconds(device.exposureDuration))
+                return
+            }
+            device.setExposureModeCustom(duration: plan.duration, iso: plan.iso) { _ in
+                run.start(frameSeconds: plan.seconds)
+            }
+            device.unlockForConfiguration()
+
+            // In case that answer never comes: a run that never started would
+            // leave the shutter waiting for it.
+            self.sessionQueue.asyncAfter(deadline: .now() + plan.seconds + 2) {
+                run.start(frameSeconds: plan.seconds)
+            }
+        }
+    }
+
+    /// A long exposure's frames: sensor data only, like the shutter's, and as
+    /// quiet. Each frame's exposure is read back out of its own metadata
+    /// before it is added, so a frame the system exposed differently from the
+    /// plan is weighted for what it got rather than averaged in as if it hadn't.
+    private func makeLongExposureSettings(_ format: OSType) -> AVCapturePhotoSettings {
+        let settings = AVCapturePhotoSettings(rawPixelFormatType: format, processedFormat: nil)
+        if #available(iOS 18.0, *), photoOutput.isShutterSoundSuppressionSupported {
+            settings.isShutterSoundSuppressionEnabled = true
+        }
+        return settings
+    }
+
+    /// The run is over. Called on the run's own queue, which is as good a
+    /// place as the photo output's for writing the negative to the buffer.
+    private func finishLongExposure(_ result: Result<LongExposureRun.Outcome, Error>,
+                                    profile: PositiveFilmProfile,
+                                    takenAt: Date) {
+        switch result {
+        case .success(let outcome):
+            do {
+                try buffer.admit(data: outcome.dng,
+                                 isRAW: true,
+                                 metadata: placed(outcome.metadata),
+                                 profile: profile,
+                                 takenAt: takenAt)
+            } catch {
+                reportError(error.localizedDescription)
+            }
+            if let note = outcome.note { reportError(note) }
+        case .failure(let error):
+            reportError(error.localizedDescription)
+        }
+
+        // After the buffer's own hop that adds the frame's square, so the
+        // count the shutter checks has gone up before it can be pressed again.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.longExposureRun = nil
+            self.longExposureClock.stop()
+            self.applyExposure()
+            self.isExposing = false
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
     }
 
     // MARK: - Focus

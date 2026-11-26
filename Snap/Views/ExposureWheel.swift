@@ -2,7 +2,8 @@
 //  ExposureWheel.swift
 //  Snap
 //
-//  Exposure compensation, at the right of the shutter row.
+//  Exposure compensation, at the right of the shutter row — or, with long
+//  exposure on, how long the shutter stays open.
 //
 //  A dial whose centre is just past the edge of the screen, so all that shows
 //  is a slice of its rim. Dragging up or down turns it, and whatever stop is
@@ -14,16 +15,77 @@
 //  dragging up brings the stops below the pointer up to it, so they ascend
 //  downward, the way the numbers on any iOS wheel do.
 //
+//  The same dial is marked two ways. As compensation it reads in thirds of a
+//  stop across ±3; as long exposure's timer, in seconds from two to thirty —
+//  a click a second, a number every five, and up is still more light.
+//
 
 import SwiftUI
 import UIKit
 
 struct ExposureWheel: View {
 
+    /// What the dial is marked in.
+    struct Scale {
+        var range: ClosedRange<Float>
+        /// The detent.
+        var step: Float
+        /// How far the wheel turns for one unit.
+        var degreesPerUnit: Double
+        /// The detents that get a long tick and a number.
+        var numberedEvery: Float
+        /// Where a double tap puts it.
+        var home: Float
+        /// The value at which it counts as untouched, and the pointer stays
+        /// out of the accent. Nil for a dial that is always a setting.
+        var neutral: Float?
+        /// The exact setting, beside the pointer.
+        var readout: (Float) -> String
+        /// A number on the rim.
+        var number: (Float) -> String
+        var accessibilityLabel: String
+        var accessibilityValue: (Float) -> String
+
+        /// Exposure compensation: thirds of a stop across ±3, the step and the
+        /// reach of a camera's dial.
+        static let compensation = Scale(
+            range: -3...3,
+            step: 1.0 / 3,
+            degreesPerUnit: 20,
+            numberedEvery: 1,
+            home: 0,
+            neutral: 0,
+            readout: { ExposureWheel.label($0) },
+            number: { value in
+                let whole = Int(value.rounded())
+                return whole > 0 ? "+\(whole)" : "\(whole)"
+            },
+            accessibilityLabel: "Exposure compensation",
+            accessibilityValue: { ExposureWheel.label($0) == "0" ? "zero" : ExposureWheel.label($0) })
+
+        /// Long exposure's timer: whole seconds. Four degrees a second keeps
+        /// about nine either side of the pointer in view, and the whole reach
+        /// one long drag.
+        static let seconds = Scale(
+            range: Float(LongExposure.range.lowerBound)...Float(LongExposure.range.upperBound),
+            step: 1,
+            degreesPerUnit: 4,
+            numberedEvery: 5,
+            home: Float(LongExposure.defaultSeconds),
+            neutral: nil,
+            readout: { "\(Int($0.rounded()))s" },
+            number: { "\(Int($0.rounded()))" },
+            accessibilityLabel: "Long exposure",
+            accessibilityValue: { "\(Int($0.rounded())) seconds" })
+    }
+
     @Binding var value: Float
-    var range: ClosedRange<Float>
-    /// The detent, in stops.
-    var step: Float = 1.0 / 3
+    var scale: Scale = .compensation
+    /// Shown in place of the setting while it is counting down.
+    var countdown: Int? = nil
+
+    private var range: ClosedRange<Float> { scale.range }
+    private var step: Float { scale.step }
 
     /// Where the wheel stands while a finger is on it. Continuous, so the rim
     /// follows the finger rather than jumping a third at a time; let go and it
@@ -37,13 +99,15 @@ struct ExposureWheel: View {
     /// The wheel's radius. Big enough that the slice on screen is a gentle
     /// curve rather than a knob, small enough that it still reads as round.
     static let radius: CGFloat = 110
-    /// How far the wheel turns for one stop. Twenty degrees on this radius puts
-    /// about a stop and a half either side of the pointer in view.
-    static let degreesPerStop: Double = 20
-    /// The same turn as distance along the rim, which is what a finger
-    /// dragging over it covers.
-    static var pointsPerStop: CGFloat {
-        radius * CGFloat(degreesPerStop * .pi / 180)
+    /// How far one unit of the scale is along the rim, which is what a
+    /// finger dragging over it covers. Twenty degrees a stop on this radius
+    /// puts about a stop and a half either side of the pointer in view.
+    private var pointsPerUnit: CGFloat {
+        ExposureWheel.radius * CGFloat(scale.degreesPerUnit * .pi / 180)
+    }
+
+    private var isSet: Bool {
+        scale.neutral.map { value != $0 } ?? true
     }
 
     /// The height of the row it sits in, which is the exposure column's.
@@ -55,29 +119,28 @@ struct ExposureWheel: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Text(ExposureWheel.label(value))
+            Text(countdown.map { "\($0)s" } ?? scale.readout(value))
                 .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
-                .foregroundStyle(value == 0 ? .white.opacity(0.45) : .white)
+                .foregroundStyle(isSet ? .white : .white.opacity(0.45))
                 .lineLimit(1)
                 .frame(width: ExposureWheel.readoutWidth, alignment: .trailing)
                 .padding(.trailing, 2)
 
             ExposureWheelFace(position: Double(turning ?? value),
-                              range: range,
-                              step: step,
-                              isSet: value != 0)
+                              scale: scale,
+                              isSet: isSet)
                 .frame(width: ExposureWheel.faceWidth, height: ExposureWheel.height)
         }
         .frame(height: ExposureWheel.height)
         .contentShape(Rectangle())
         .gesture(turn)
         // Double-tapping a slider puts it back to zero everywhere else in the
-        // app; the wheel is the same kind of control.
+        // app; the wheel is the same kind of control, and its zero is `home`.
         .onTapGesture(count: 2) { reset() }
         .accessibilityElement()
-        .accessibilityLabel("Exposure compensation")
-        .accessibilityValue(ExposureWheel.label(value) == "0" ? "zero" : ExposureWheel.label(value))
+        .accessibilityLabel(scale.accessibilityLabel)
+        .accessibilityValue(countdown.map { "\($0) seconds left" } ?? scale.accessibilityValue(value))
         .accessibilityAdjustableAction { direction in
             switch direction {
             case .increment: nudge(by: 1)
@@ -85,7 +148,9 @@ struct ExposureWheel: View {
             @unknown default: break
             }
         }
-        .accessibilityAction(named: "Reset to zero") { value = 0 }
+        .accessibilityAction(named: scale.home == 0 ? "Reset to zero" : "Reset to \(scale.readout(scale.home))") {
+            value = scale.home
+        }
     }
 
     // MARK: - Turning
@@ -100,7 +165,7 @@ struct ExposureWheel: View {
                 }
 
                 // Up is negative in screen space and positive in stops.
-                let raw = start - Float(drag.translation.height / ExposureWheel.pointsPerStop)
+                let raw = start - Float(drag.translation.height / pointsPerUnit)
                 let position = min(max(raw, range.lowerBound), range.upperBound)
                 turning = position
 
@@ -132,10 +197,10 @@ struct ExposureWheel: View {
     }
 
     private func reset() {
-        guard value != 0 else { return }
+        guard value != scale.home else { return }
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-            value = 0
+            value = scale.home
         }
     }
 
@@ -159,11 +224,14 @@ private struct ExposureWheelFace: View, Animatable {
 
     /// The stop under the pointer. Fractional while a finger is turning it.
     var position: Double
-    let range: ClosedRange<Float>
-    let step: Float
-    /// True while the compensation is anything but zero, which is when the
-    /// pointer takes the accent: it is a setting that changes the photograph.
+    let scale: ExposureWheel.Scale
+    /// True while the dial is set to anything but its neutral, which is when
+    /// the pointer takes the accent: it is a setting that changes the
+    /// photograph.
     let isSet: Bool
+
+    private var range: ClosedRange<Float> { scale.range }
+    private var step: Float { scale.step }
 
     var animatableData: Double {
         get { position }
@@ -196,7 +264,7 @@ private struct ExposureWheelFace: View, Animatable {
         let radius = ExposureWheel.radius
         let middle = size.height / 2
         let center = CGPoint(x: Self.rimInset + radius, y: middle)
-        let perStop = ExposureWheel.degreesPerStop * .pi / 180
+        let perStop = scale.degreesPerUnit * .pi / 180
         // As far round as the slice shows, plus a little so nothing pops in at
         // the very edge.
         let reach = asin(min(1, Double(middle + 8) / Double(radius)))
@@ -227,15 +295,17 @@ private struct ExposureWheelFace: View, Animatable {
         context.fill(face, with: .color(.white.opacity(0.06)))
         context.stroke(rim, with: .color(.white.opacity(0.3)), lineWidth: 1)
 
-        // A tick per detent, longer on the whole stops, and the whole stops
-        // numbered. Laid along the radius, so they turn with the wheel.
+        // A tick per detent, longer on the numbered ones — the whole stops,
+        // or every fifth second. Laid along the radius, so they turn with the
+        // wheel.
         let detents = Int(((range.upperBound - range.lowerBound) / step).rounded())
         for index in 0...detents {
             let stop = Double(range.lowerBound) + Double(index) * Double(step)
             let angle = (stop - position) * perStop
             guard abs(angle) <= reach else { continue }
 
-            let isWhole = abs(stop - stop.rounded()) < 0.01
+            let every = Double(scale.numberedEvery)
+            let isWhole = abs(stop / every - (stop / every).rounded()) < 0.01
             let isUnderPointer = abs(stop - position) < Double(step) / 2
             let length: CGFloat = isWhole ? 9 : 5
 
@@ -248,8 +318,7 @@ private struct ExposureWheelFace: View, Animatable {
             context.stroke(tick, with: .color(tickColor), lineWidth: isWhole ? 1.2 : 0.8)
 
             guard isWhole else { continue }
-            let whole = Int(stop.rounded())
-            let number = Text(whole > 0 ? "+\(whole)" : "\(whole)")
+            let number = Text(scale.number(Float(stop)))
                 .font(.system(size: 10, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(Color.white.opacity(isUnderPointer ? 0.95 : 0.55))
@@ -278,7 +347,7 @@ private struct ExposureWheelFace: View, Animatable {
         var body: some View {
             ZStack(alignment: .trailing) {
                 Color.black.ignoresSafeArea()
-                ExposureWheel(value: $value, range: -3...3)
+                ExposureWheel(value: $value, scale: .compensation)
             }
         }
     }
