@@ -582,6 +582,16 @@ struct CameraView: View {
             if isDeveloping {
                 captureButton
                     .transition(.opacity)
+            } else if viewing == nil, camera.isLongExposureOn {
+                // In the middle of the row the eye is already on, under the
+                // frame being exposed.
+                LongExposureCountdown(camera: camera, clock: camera.longExposureClock)
+            } else if viewing == nil, camera.isDoubleExposureOn {
+                Text(camera.isHoldingExposure ? "SECOND EXPOSURE" : "FIRST EXPOSURE")
+                    .font(.system(size: 10, weight: .medium))
+                    .tracking(1.1)
+                    .foregroundStyle(.white.opacity(camera.isHoldingExposure ? 0.85 : 0.5))
+                    .animation(.easeOut(duration: 0.12), value: camera.isHoldingExposure)
             }
         }
         // The inset is 8 here and 6 inside the readout, so both numbers still
@@ -956,8 +966,8 @@ struct CameraView: View {
     }
 
     /// One dot per lens, widening left to right the way the lenses do, then
-    /// the macro flower and the long-exposure hourglass, centred under the
-    /// shutter together. The dots are hidden on a single-camera device, where
+    /// the macro flower, the long-exposure hourglass and the double-exposure
+    /// squares, centred under the shutter together. The dots are hidden on a single-camera device, where
     /// there is nothing to choose; the hourglass stays wherever there is RAW.
     @ViewBuilder
     private var lensPicker: some View {
@@ -998,6 +1008,11 @@ struct CameraView: View {
                 // photograph is taken rather than which glass it goes through.
                 if camera.isLongExposureAvailable {
                     longExposureToggle
+                }
+
+                // The same kind of switch again, so it sits in the same row.
+                if camera.isDoubleExposureAvailable {
+                    doubleExposureToggle
                 }
             }
         }
@@ -1050,6 +1065,28 @@ struct CameraView: View {
         .disabled(camera.isExposing)
         .accessibilityLabel("Long exposure")
         .accessibilityValue(camera.isLongExposureOn ? "On" : "Off")
+    }
+
+    /// Two squares, one over the other, lit while double exposure is on and
+    /// filled in once the first exposure is held — which is when the ghost is
+    /// over the frame and the next press finishes the photograph. Tapping it
+    /// then ends the double exposure, and the first is kept on its own.
+    private var doubleExposureToggle: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            camera.toggleDoubleExposure()
+        } label: {
+            Image(systemName: camera.isHoldingExposure ? "square.filled.on.square" : "square.on.square")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(camera.isDoubleExposureOn ? Color.snapAccent : .white.opacity(0.55))
+                .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(camera.isExposing)
+        .accessibilityLabel("Double exposure")
+        .accessibilityValue(camera.isHoldingExposure ? "First exposure taken"
+                            : camera.isDoubleExposureOn ? "On" : "Off")
     }
 
     @ViewBuilder
@@ -1409,6 +1446,7 @@ struct CameraView: View {
         camera.releaseExposure()
         camera.exposureBias = 0
         camera.endLongExposure()
+        camera.endDoubleExposure()
         camera.releaseFocus()
         camera.selectDefaultLens()
         // Black and white stays: it is a standing choice that survives a
@@ -1709,6 +1747,28 @@ private struct ExposureControl: View {
         } else {
             ExposureWheel(value: $camera.exposureBias, scale: .compensation)
         }
+    }
+}
+
+/// The time left, under the frame, while a long exposure is open — and the
+/// time it will take, dimmer, while it isn't yet. The readout beside the wheel
+/// counts down too, but it is small and at the edge of the screen, and this is
+/// where somebody waiting on a tripod is looking.
+private struct LongExposureCountdown: View {
+
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var clock: LongExposureClock
+
+    var body: some View {
+        let remaining = clock.remaining
+        Text("\(remaining ?? camera.longExposureSeconds)s")
+            .font(.system(size: 15, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(remaining == nil ? Color.white.opacity(0.4) : Color.white)
+            .contentTransition(.numericText(countsDown: true))
+            .animation(.easeOut(duration: 0.2), value: remaining)
+            .accessibilityLabel(remaining.map { "\($0) seconds left" }
+                                ?? "Long exposure, \(camera.longExposureSeconds) seconds")
     }
 }
 

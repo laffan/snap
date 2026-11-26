@@ -13,12 +13,18 @@
 //  negative like any other: the buffer develops it, the roll shows it, the
 //  sliders re-develop it and Lightroom opens it.
 //
-//  What the frames are exposed at is the meter's, unless a pin says otherwise.
-//  In auto, the light the meter wants is spread over the longest frame the
-//  format allows at the lowest ISO that gets there — a dark street metered at
-//  1/8 and ISO 2000 becomes one second at ISO 250 — since a long frame at low
-//  gain is less noise for the same light. With either half pinned, the frames are what
-//  the photographer chose.
+//  The frames are added, not averaged. An average lands at one frame's
+//  brightness, which sounds the same and isn't: a headlight that clips to
+//  white in the frame it crosses comes out of an average as a tenth of white,
+//  and a trail that should be the brightest thing in the photograph is a
+//  smudge. Added, it is as bright as it was.
+//
+//  With an ISO pinned, that is all there is to it: ten seconds at ISO 100 is
+//  ten times as much light as one, as on any camera. Otherwise the meter
+//  decides how bright the whole run comes out, and each frame is exposed for
+//  its share of that — a dark street metered at one second and ISO 500 becomes
+//  ten one-second frames at about ISO 55 — so no frame clips before the sum
+//  would, and the sum is where the meter wanted it.
 //
 //  Each frame is added as its own DNG holds it: packaged by AVFoundation,
 //  decoded here, its black level taken off. It used to be added from the pixel
@@ -48,22 +54,40 @@ enum LongExposure {
     /// running total is a float per photosite, which stays exact far past this.
     static let maxFrames = 400
 
-    /// How the frames are exposed.
+    /// A guess at how long a RAW frame takes to turn round between one and the
+    /// next, used only to share the meter's light out over the frames that
+    /// will actually fit. The merge is scaled to what the frames really got,
+    /// so a wrong guess costs a little noise rather than brightness.
+    static let turnaround: TimeInterval = 0.1
+
+    /// How the frames are exposed, and how bright the sum should come out.
     struct Plan {
         let duration: CMTime
         let iso: Float
+        /// The light the whole run should come to, as seconds times ISO — the
+        /// meter's — or nil when an ISO is pinned and the frames simply add up.
+        let target: Double?
 
         var seconds: TimeInterval { CMTimeGetSeconds(duration) }
+        /// One frame's exposure, seconds times ISO.
+        var frameExposure: Double { seconds * Double(iso) }
     }
 
     /// The frame exposure for a run of `total` seconds. Session queue — it
     /// reads what the device is doing now.
     ///
-    /// With a pin, the pins stand, and the half that isn't pinned is wherever
-    /// the priority mode has been holding it. In auto, the meter's reading is
-    /// taken as one quantity — seconds times ISO, corrected by how far the
-    /// meter says it is off — and handed to the longest frame that doesn't
-    /// need an ISO below the sensor's base.
+    /// A pinned shutter is each frame's length; otherwise frames are as long as
+    /// the format allows, since every frame brings its own read noise. A pinned
+    /// ISO is each frame's ISO, and the frames add up as they are. Without one,
+    /// the meter's reading is taken as one quantity — seconds times ISO,
+    /// corrected by how far the meter says it is off — and each frame gets the
+    /// ISO that takes the frames that fit in the run to it together.
+    ///
+    /// In bright light that share is below the sensor's base ISO. The frames
+    /// then go to base ISO and, if even that would make one frame brighter than
+    /// an ordinary photograph, shorter; the sum comes out too bright and is
+    /// scaled down, which is the average again — what the run can do without a
+    /// neutral-density filter.
     static func plan(for device: AVCaptureDevice,
                      total: TimeInterval,
                      pinnedShutter: CMTime?,
@@ -88,10 +112,10 @@ enum LongExposure {
 
         let current = device.exposureDuration
         let currentISO = device.iso
+        var duration = clampedDuration(pinnedShutter ?? longest)
 
-        if pinnedShutter != nil || pinnedISO != nil {
-            return Plan(duration: clampedDuration(pinnedShutter ?? current),
-                        iso: clampedISO(pinnedISO ?? currentISO))
+        if let pinnedISO {
+            return Plan(duration: duration, iso: clampedISO(pinnedISO), target: nil)
         }
 
         // Past four stops the meter is guessing, and auto has usually gone as
@@ -99,13 +123,27 @@ enum LongExposure {
         let offset = Double(min(max(device.exposureTargetOffset, -4), 4))
         let wanted = CMTimeGetSeconds(current) * Double(currentISO) * pow(2, -offset)
         guard wanted.isFinite, wanted > 0 else {
-            return Plan(duration: clampedDuration(current), iso: clampedISO(currentISO))
+            // No reading worth sharing out: frames as the camera has them, and
+            // the sum brought back to one of them.
+            let frame = Plan(duration: clampedDuration(current), iso: clampedISO(currentISO), target: nil)
+            return Plan(duration: frame.duration, iso: frame.iso, target: frame.frameExposure)
         }
 
-        let duration = clampedDuration(CMTime(seconds: wanted / Double(format.minISO),
-                                              preferredTimescale: 1_000_000))
-        return Plan(duration: duration,
-                    iso: clampedISO(Float(wanted / CMTimeGetSeconds(duration))))
+        // Each frame's share of the light, over as many frames as will fit.
+        let seconds = CMTimeGetSeconds(duration)
+        let frames = max(1, total / (seconds + turnaround))
+        var iso = Float(wanted / (frames * seconds))
+
+        if iso < format.minISO {
+            iso = format.minISO
+            // Never a frame brighter than an ordinary photograph would be.
+            if pinnedShutter == nil {
+                let single = CMTime(seconds: wanted / Double(format.minISO), preferredTimescale: 1_000_000)
+                if CMTimeCompare(single, duration) < 0 { duration = clampedDuration(single) }
+            }
+        }
+
+        return Plan(duration: duration, iso: clampedISO(iso), target: wanted)
     }
 }
 
@@ -201,6 +239,11 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
     private let addQueue = DispatchQueue(label: "com.snap.long-exposure.add", qos: .userInitiated)
 
     private var frameSeconds: TimeInterval = 1
+    /// The light the sum should come to, seconds times ISO, or nil for the sum
+    /// as it stands; and one frame's planned exposure, for when a frame's own
+    /// metadata doesn't say.
+    private var target: Double?
+    private var frameExposure: Double?
     private var startedAt: CFTimeInterval?
     private var openedAt: CFTimeInterval?
     private var closedAt: CFTimeInterval?
@@ -237,10 +280,12 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
 
     /// Once the device is exposing at the plan's settings. Only the first call
     /// counts, so a fallback can be scheduled behind the real one.
-    func start(frameSeconds: TimeInterval) {
+    func start(frameSeconds: TimeInterval, target: Double?, frameExposure: Double?) {
         queue.async { [self] in
             guard !isFinished, startedAt == nil else { return }
             self.frameSeconds = max(frameSeconds, 0.001)
+            self.target = target
+            self.frameExposure = frameExposure
             startedAt = CACurrentMediaTime()
             next()
         }
@@ -434,6 +479,8 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
         let stack = self.stack
         let incompatibility = self.incompatibility
         let failure = error
+        let target = self.target
+        let reference = referenceExposure ?? frameExposure
 
         // Behind every add already queued, since this queue is serial — so
         // what the stack holds by now is everything that will go in.
@@ -446,10 +493,17 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
                     : "The long exposure's frames couldn't be read, so the first was kept on its own: \(failure.localizedDescription)"
             }
             if let raw, let stack, added > 0 {
+                // The sum as it stands, or brought to the meter's light: the
+                // stack counts exposure in units of the first frame's.
+                var scale = 1.0
+                if let target, let reference, reference > 0, stack.exposure > 0 {
+                    scale = target / (reference * stack.exposure)
+                }
                 do {
-                    let dng = try raw.replacingImage(with: stack.merged(),
+                    let dng = try raw.replacingImage(with: stack.merged(scale: scale),
                                                      exposureTime: span,
-                                                     noiseScale: 1 / max(stack.exposure, 1))
+                                                     noise: (signal: scale,
+                                                             floor: scale * scale * Double(stack.frames)))
                     completion(.success(Outcome(dng: dng,
                                                 metadata: LongExposureRun.stamped(metadata, seconds: span),
                                                 frames: stack.frames,

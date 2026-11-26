@@ -29,8 +29,8 @@
 //    · RawDataUniqueID is new, so a converter's cache doesn't take the merge
 //      for the first frame
 //    · ExposureTime is the time the stack spans
-//    · the noise profile is divided by how many frames went in, since that is
-//      what averaging them did to the noise
+//    · the noise profile says what adding the frames did to the noise, so a
+//      converter's noise reduction is set for the file it is actually given
 //
 
 import Foundation
@@ -62,6 +62,9 @@ struct DNGRaw {
     let blackOriginRow: Int
     let blackOriginColumn: Int
     let whiteLevel: Float
+    /// The DNG's UniqueCameraModel — the sensor the negative came off, as the
+    /// file names it.
+    let cameraModel: String?
 
     /// How many strips or tiles the image is stored in.
     var segmentCount: Int { offsets.count }
@@ -184,6 +187,7 @@ struct DNGRaw {
         if let pointer = directories.first.flatMap({ first(34665, in: $0) }) {
             exif = try? file.directory(at: pointer).directory
         }
+        let cameraModel = directories.lazy.compactMap { $0[50708] }.first.map { file.string($0) }
 
         self.file = file
         self.directories = directories
@@ -202,6 +206,7 @@ struct DNGRaw {
         self.blackOriginRow = originRow
         self.blackOriginColumn = originColumn
         self.whiteLevel = white
+        self.cameraModel = cameraModel
     }
 
     /// The part of the image a strip or tile holds, as stored — a tile at the
@@ -289,12 +294,15 @@ struct DNGRaw {
     /// The same DNG with `samples` — `width × height` of them, row by row —
     /// as its sensor image.
     ///
-    /// `exposureTime` replaces the EXIF exposure, in seconds. `noiseScale`
-    /// multiplies the noise profile: averaging N frames divides the noise
-    /// variance by N, so the merge passes 1/N.
+    /// `exposureTime` replaces the EXIF exposure, in seconds; nil leaves it.
+    ///
+    /// `noise` rescales the noise profile, which models a frame's variance as
+    /// `signal × x + floor` and is written as those two numbers. N frames added
+    /// and multiplied by k have `k × signal` and `k² × N × floor`: the shot
+    /// noise grows with the light and the read noise with every frame.
     func replacingImage(with samples: [UInt16],
                         exposureTime: Double?,
-                        noiseScale: Double) throws -> Data {
+                        noise: (signal: Double, floor: Double)) throws -> Data {
         guard samples.count == width * height else {
             throw Failure.unsupported("the merged image is the wrong size")
         }
@@ -378,15 +386,18 @@ struct DNGRaw {
             }
         }
 
-        if noiseScale > 0, noiseScale != 1 {
+        if noise.signal > 0, noise.floor > 0, noise != (1, 1) {
             for directory in directories {
                 if let entry = directory[51041], entry.type == TIFFFile.double {
-                    out.setDoubles(entry, to: out.numbers(entry).map { $0 * noiseScale })
+                    let scaled = out.numbers(entry).enumerated().map { index, value in
+                        value * (index % 2 == 0 ? noise.signal : noise.floor)
+                    }
+                    out.setDoubles(entry, to: scaled)
                 }
                 // Relative to the camera's own, as a multiplier on its standard
-                // deviation rather than its variance.
-                if let entry = directory[50731], entry.type == TIFFFile.rational {
-                    let value = out.number(entry, at: 0) * noiseScale.squareRoot()
+                // deviation, which over most of the frame is the shot noise's.
+                if let entry = directory[50731], entry.type == TIFFFile.rational, noise.signal != 1 {
+                    let value = out.number(entry, at: 0) * noise.signal.squareRoot()
                     let fraction = DNGRaw.rational(value, precision: 10_000)
                     out.setRational(entry, numerator: fraction.numerator, denominator: fraction.denominator)
                 }
@@ -601,6 +612,12 @@ struct TIFFFile {
         case 9:       return Int(Int32(bitPattern: read32(at)))
         default:      return Int(number(entry, at: index))
         }
+    }
+
+    /// An ASCII value, up to its terminating zero.
+    func string(_ entry: Entry) -> String {
+        let bytes = storage[entry.valuePosition ..< entry.valuePosition + entry.count]
+        return String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
     }
 
     func numbers(_ entry: Entry) -> [Double] {

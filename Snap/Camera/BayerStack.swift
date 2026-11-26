@@ -10,17 +10,15 @@
 //  it happens before anything — demosaicing, white balance, a tone curve — has
 //  made a decision that adding afterwards would have to undo.
 //
-//  What comes out is the average, put back on the scale the frames were on, so
-//  it drops into the first frame's DNG as if the sensor had produced it. An
-//  average rather than a sum because the sum would be N times too bright and
-//  clip; the light the extra frames brought shows up instead as noise that has
-//  gone down, by the square root of how many there were.
+//  What comes out is the light added up, times a scale, with the black level
+//  put back — so it drops into the first frame's DNG as if the sensor had
+//  produced it, and whatever passes the white level clips there, as it would on
+//  a sensor that had been open the whole time. The scale is the caller's:
 //
-//  Frames of different exposures are weighted by it. Each one is the light it
-//  collected — black taken off — and the merge is all of that light divided by
-//  all of the exposure, so a frame that got twice the light counts for twice as
-//  much, which is what it is worth. With every frame alike that is the plain
-//  average.
+//    · 1 is the plain sum, which is what a double exposure is, and a long
+//      exposure at an ISO somebody pinned
+//    · 1 / the frames' exposure is the average, the brightness of one frame
+//    · anything between puts the sum where a meter wanted it
 //
 //  The running total is one float per photosite: 48 MB for twelve megapixels,
 //  whatever the number of frames. Each frame is added and let go as it arrives,
@@ -172,15 +170,22 @@ final class BayerStack {
         }
     }
 
-    /// The average, on the frames' own scale: all the light divided by all the
-    /// exposure, with the black level put back.
+    /// The plain sum: every frame's light, all of it.
+    func summed() -> [UInt16] { merged(scale: 1) }
+
+    /// The average, the brightness of one frame: all the light divided by all
+    /// the exposure.
+    func averaged() -> [UInt16] { merged(scale: exposure > 0 ? 1 / exposure : 0) }
+
+    /// The light added up and multiplied by `scale`, with the black level put
+    /// back and the white level as the ceiling.
     ///
     /// Rounded to whole numbers, which is finer than anything a frame could
     /// show on its own — a single frame's noise is many of these steps across.
-    func merged() -> [UInt16] {
+    func merged(scale: Double) -> [UInt16] {
         var out = [UInt16](repeating: 0, count: width * height)
-        guard exposure > 0 else { return out }
-        let divisor = Float(1 / exposure)
+        guard frames > 0 else { return out }
+        let divisor = Float(scale)
         let white = self.white
         let width = self.width
 

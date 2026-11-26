@@ -138,6 +138,54 @@ final class CameraModel: NSObject, ObservableObject {
     /// Frames are added together as sensor data, so it needs Bayer RAW.
     var isLongExposureAvailable: Bool { isRAWAvailable }
 
+    /// The two squares after the hourglass: the shutter's next two frames are
+    /// one photograph, the second composed over a ghost of the first. See
+    /// `DoubleExposure`.
+    @Published private(set) var isDoubleExposureOn = false
+
+    /// The first of the two has been taken and is waiting for the second.
+    @Published private(set) var isHoldingExposure = false
+
+    /// Added as sensor data too, so Bayer RAW again.
+    var isDoubleExposureAvailable: Bool { isRAWAvailable }
+
+    /// A first exposure waiting for its second. In memory rather than on disk:
+    /// it is one negative, and the moments between two exposures are spent in
+    /// the app with the camera up. Main thread.
+    private struct HeldExposure {
+        let dng: Data
+        let metadata: [String: Any]
+        let profile: PositiveFilmProfile
+        let takenAt: Date
+        /// How far under the wheel it was taken: none with both pins set,
+        /// since compensation moves nothing then.
+        let stopsUnder: Float
+    }
+    private var heldExposure: HeldExposure?
+
+    /// Which of the two the frame on the sensor is, read off as it arrives —
+    /// one slot, like `exposureIsBuffered`, since only one frame is ever on the
+    /// sensor at a time.
+    private enum DoubleStage {
+        case first(stopsUnder: Float)
+        case second(HeldExposure)
+    }
+    private var doubleStage: DoubleStage?
+
+    /// The first exposure as the viewfinder showed it, laid over the live
+    /// frames while the second is composed. Written on the main thread, read on
+    /// the capture queue for every frame.
+    private let ghostLock = NSLock()
+    private var ghost: CIImage?
+    /// The ghost rendered and waiting for its exposure to be held, and a count
+    /// that moves whenever it is cleared, so a render that finishes after its
+    /// exposure was let go doesn't come back.
+    private var renderedGhost: CIImage?
+    private var ghostGeneration = 0
+
+    /// Where two exposures are added together, off the photo output's queue.
+    private let doubleQueue = DispatchQueue(label: "com.snap.double-exposure", qos: .userInitiated)
+
     /// A stored negative being re-filtered in place of the live camera.
     @Published private(set) var versionSource: Shot? = nil
 
@@ -629,7 +677,17 @@ final class CameraModel: NSObject, ObservableObject {
     ///
     /// Held per device, so a lens swap has to send it again.
     private func applyExposureBias() {
-        let bias = isLongExposureOn ? 0 : exposureBias
+        // Long exposure's wheel is its timer, so no compensation; a double
+        // exposure's two frames are each a stop under it, so that the two add
+        // up to what the wheel says.
+        let bias: Float
+        if isLongExposureOn {
+            bias = 0
+        } else if isDoubleExposureOn {
+            bias = exposureBias - DoubleExposure.stopsUnder
+        } else {
+            bias = exposureBias
+        }
 
         sessionQueue.async { [weak self] in
             guard let device = self?.videoDevice else { return }
@@ -816,9 +874,10 @@ final class CameraModel: NSObject, ObservableObject {
     ///
     /// Off goes back to whichever lens was up when it went on.
     func toggleMacro() {
-        // Not mid-exposure: the frames are added photosite by photosite, and
-        // a frame through other glass is a different photograph.
-        guard longExposureRun == nil else { return }
+        // Not mid-exposure, nor with a first exposure waiting: the frames are
+        // added photosite by photosite, and a frame through other glass came
+        // off another sensor.
+        guard longExposureRun == nil, heldExposure == nil else { return }
         if isMacroOn {
             let back = lensBeforeMacro
                 ?? lenses.first { $0.deviceType == .builtInWideAngleCamera }
@@ -872,7 +931,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// which glass is in use, and choosing one — the ultra wide included —
     /// means wanting it as it comes.
     func selectLens(_ lens: Lens) {
-        guard longExposureRun == nil else { return }
+        guard longExposureRun == nil, heldExposure == nil else { return }
         endMacro()
         switchLens(to: lens)
     }
@@ -888,7 +947,10 @@ final class CameraModel: NSObject, ObservableObject {
         if isLongExposureOn {
             endLongExposure()
         } else {
-            guard isLongExposureAvailable else { return }
+            guard isLongExposureAvailable, !isExposing else { return }
+            // One or the other: a long exposure is one photograph made of
+            // many frames, a double exposure two photographs on one.
+            endDoubleExposure()
             isLongExposureOn = true
             applyExposureBias()
         }
@@ -899,6 +961,146 @@ final class CameraModel: NSObject, ObservableObject {
         guard isLongExposureOn, longExposureRun == nil else { return }
         isLongExposureOn = false
         applyExposureBias()
+    }
+
+    // MARK: - Double exposure
+
+    /// Double exposure on or off. Not while a frame is on the sensor.
+    func toggleDoubleExposure() {
+        guard !isExposing else { return }
+        if isDoubleExposureOn {
+            endDoubleExposure()
+        } else {
+            guard isDoubleExposureAvailable else { return }
+            endLongExposure()
+            isDoubleExposureOn = true
+            applyExposureBias()
+        }
+    }
+
+    /// Back to the ordinary shutter.
+    ///
+    /// A first exposure still waiting is kept, as a photograph of its own and
+    /// brought back up the stop it was taken under: a frame nobody wanted is a
+    /// swipe away in the roll, and a frame that was never kept is gone.
+    func endDoubleExposure() {
+        guard isDoubleExposureOn, !isExposing else { return }
+        isDoubleExposureOn = false
+        applyExposureBias()
+        releaseHeldExposure()
+    }
+
+    private func releaseHeldExposure() {
+        clearGhost()
+        guard let held = heldExposure else { return }
+        heldExposure = nil
+        isHoldingExposure = false
+
+        doubleQueue.async { [weak self] in
+            guard let self else { return }
+            let negative = (try? DoubleExposure.alone(held.dng, stopsUnder: held.stopsUnder)) ?? held.dng
+            do {
+                try self.buffer.admit(data: negative,
+                                      isRAW: true,
+                                      metadata: held.metadata,
+                                      profile: held.profile,
+                                      takenAt: held.takenAt)
+            } catch {
+                self.reportError(error.localizedDescription)
+            }
+        }
+    }
+
+    /// The viewfinder as it stands, rendered once so it no longer depends on
+    /// the camera's buffers, to be laid over the live frames once the
+    /// exposure it shows is held.
+    private func renderGhost() {
+        guard let image = renderer.currentImage else { return }
+        let generation = ghostGeneration
+        developQueue.async { [weak self] in
+            guard let self, let rendered = self.stillContext.createCGImage(image, from: image.extent) else { return }
+            DispatchQueue.main.async {
+                guard self.ghostGeneration == generation else { return }
+                self.renderedGhost = CIImage(cgImage: rendered)
+                self.showGhostIfHeld()
+            }
+        }
+    }
+
+    private func showGhostIfHeld() {
+        let image = isHoldingExposure ? renderedGhost : nil
+        ghostLock.lock()
+        ghost = image
+        ghostLock.unlock()
+    }
+
+    private func clearGhost() {
+        ghostGeneration += 1
+        renderedGhost = nil
+        ghostLock.lock()
+        ghost = nil
+        ghostLock.unlock()
+    }
+
+    private var currentGhost: CIImage? {
+        ghostLock.lock()
+        defer { ghostLock.unlock() }
+        return ghost
+    }
+
+    /// The first exposure is in: held, and the ghost goes up. Called on the
+    /// photo output's queue.
+    private func holdExposure(_ held: HeldExposure) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // Long enough for the mode to have been switched off with the
+            // frame on the sensor? Then it is a photograph of its own.
+            self.heldExposure = held
+            self.isHoldingExposure = true
+            if self.isDoubleExposureOn {
+                self.showGhostIfHeld()
+            } else {
+                self.releaseHeldExposure()
+            }
+            self.isExposing = false
+        }
+    }
+
+    /// The second exposure is in: the two added, and the result into the
+    /// buffer like any other frame. Should they refuse to add, both are kept as
+    /// they are rather than either lost. Called on the photo output's queue.
+    private func completeDoubleExposure(_ held: HeldExposure,
+                                        second: Data,
+                                        metadata: [String: Any],
+                                        profile: PositiveFilmProfile,
+                                        takenAt: Date) {
+        doubleQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let merged = try DoubleExposure.merge(held.dng, second)
+                try self.buffer.admit(data: merged,
+                                      isRAW: true,
+                                      metadata: held.metadata,
+                                      profile: profile,
+                                      takenAt: held.takenAt)
+            } catch {
+                try? self.buffer.admit(data: held.dng, isRAW: true, metadata: held.metadata,
+                                       profile: held.profile, takenAt: held.takenAt)
+                try? self.buffer.admit(data: second, isRAW: true, metadata: metadata,
+                                       profile: profile, takenAt: takenAt)
+                self.reportError("The two exposures couldn't be added together, so both were kept as they are. \(error.localizedDescription)")
+            }
+
+            // After the buffer's own hop that adds the frame's square, so the
+            // count the shutter checks has gone up before it can be pressed
+            // again.
+            DispatchQueue.main.async {
+                self.heldExposure = nil
+                self.isHoldingExposure = false
+                self.clearGhost()
+                self.isExposing = false
+            }
+        }
     }
 
     /// Swaps the session's input. RAW support is per-lens, so it is resolved
@@ -1001,6 +1203,19 @@ final class CameraModel: NSObject, ObservableObject {
             guard !isBusy, !hasBufferedFrames else { return }
             isCapturing = true
         }
+        // The shutter's frames, and only those, are one half of a double
+        // exposure or the other. The first is seen as the viewfinder showed it,
+        // so that is what is kept for the ghost.
+        doubleStage = nil
+        if isBuffered, isDoubleExposureOn, isDoubleExposureAvailable {
+            if let held = heldExposure {
+                doubleStage = .second(held)
+            } else {
+                doubleStage = .first(stopsUnder: exposureMode == .manual ? 0 : DoubleExposure.stopsUnder)
+                renderGhost()
+            }
+        }
+
         isExposing = true
         exposureIsBuffered = isBuffered
         wantsTitle = titled
@@ -1111,18 +1326,22 @@ final class CameraModel: NSObject, ObservableObject {
             // which is what the completion handler says.
             guard device.isExposureModeSupported(.custom),
                   (try? device.lockForConfiguration()) != nil else {
-                run.start(frameSeconds: CMTimeGetSeconds(device.exposureDuration))
+                // Frames as the camera has them, and the sum brought back to
+                // one of them, since nothing was shared out.
+                let seconds = CMTimeGetSeconds(device.exposureDuration)
+                let exposure = seconds * Double(device.iso)
+                run.start(frameSeconds: seconds, target: exposure, frameExposure: exposure)
                 return
             }
             device.setExposureModeCustom(duration: plan.duration, iso: plan.iso) { _ in
-                run.start(frameSeconds: plan.seconds)
+                run.start(frameSeconds: plan.seconds, target: plan.target, frameExposure: plan.frameExposure)
             }
             device.unlockForConfiguration()
 
             // In case that answer never comes: a run that never started would
             // leave the shutter waiting for it.
             self.sessionQueue.asyncAfter(deadline: .now() + plan.seconds + 2) {
-                run.start(frameSeconds: plan.seconds)
+                run.start(frameSeconds: plan.seconds, target: plan.target, frameExposure: plan.frameExposure)
             }
         }
     }
@@ -1668,6 +1887,13 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
+    /// A first exposure that never arrived takes its ghost with it; a second
+    /// that never arrived leaves the first held, to be tried again.
+    private func dropGhostIfFirst(_ stage: DoubleStage?) {
+        guard case .first? = stage else { return }
+        DispatchQueue.main.async { [weak self] in self?.clearGhost() }
+    }
+
     /// A frame that never arrived. Nothing reached the buffer, so a buffered
     /// one has only the shutter to give back.
     private func failExposure(_ message: String, isBuffered: Bool) {
@@ -1825,7 +2051,24 @@ extension CameraModel: AVCaptureVideoDataOutputSampleBufferDelegate {
             image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
 
-        renderer.setImage(look.filter.apply(to: image))
+        var graded = look.filter.apply(to: image)
+
+        // A first exposure waiting for its second, added to the live frame in
+        // light the way the two negatives will be — each a stop under, so the
+        // sum on screen is the photograph the second press will make.
+        if let ghost = currentGhost, !ghost.extent.isEmpty, !graded.extent.isEmpty {
+            let target = graded.extent
+            let fitted = ghost
+                .transformed(by: CGAffineTransform(scaleX: target.width / ghost.extent.width,
+                                                   y: target.height / ghost.extent.height))
+            let placed = fitted.transformed(by: CGAffineTransform(translationX: target.minX - fitted.extent.minX,
+                                                                  y: target.minY - fitted.extent.minY))
+            graded = placed.applyingFilter("CIAdditionCompositing",
+                                           parameters: [kCIInputBackgroundImageKey: graded])
+                .cropped(to: target)
+        }
+
+        renderer.setImage(graded)
     }
 }
 
@@ -1837,13 +2080,16 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                      didFinishProcessingPhoto photo: AVCapturePhoto,
                      error: Error?) {
         let isBuffered = exposureIsBuffered
+        let stage = doubleStage
 
         if let error {
+            dropGhostIfFirst(stage)
             failExposure(error.localizedDescription, isBuffered: isBuffered)
             return
         }
 
         guard let data = photo.fileDataRepresentation() else {
+            dropGhostIfFirst(stage)
             failExposure("The photo could not be read.", isBuffered: isBuffered)
             return
         }
@@ -1858,6 +2104,18 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
         let wantsTitle = self.wantsTitle
 
         if isBuffered {
+            switch stage {
+            case .first(let stopsUnder)? where isRAW:
+                holdExposure(HeldExposure(dng: data, metadata: metadata, profile: profile,
+                                          takenAt: takenAt, stopsUnder: stopsUnder))
+                return
+            case .second(let held)? where isRAW:
+                completeDoubleExposure(held, second: data, metadata: metadata,
+                                       profile: profile, takenAt: takenAt)
+                return
+            default:
+                break
+            }
             do {
                 try buffer.admit(data: data,
                                  isRAW: isRAW,
