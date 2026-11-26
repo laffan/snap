@@ -127,8 +127,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// What the dial says while long exposure is on, in seconds.
     @Published var longExposureSeconds = LongExposure.defaultSeconds
 
-    /// The countdown while one is being taken.
-    let longExposureClock = LongExposureClock()
+    /// The countdown while one is being taken. Made the first time it is
+    /// wanted: nothing to do with long exposure is built on the way up.
+    lazy var longExposureClock = LongExposureClock()
 
     /// The long exposure being taken, held until it lands. The photo output
     /// holds its delegates weakly, so this is what keeps the run alive.
@@ -1166,8 +1167,34 @@ final class CameraModel: NSObject, ObservableObject {
             self.longExposureRun = nil
             self.longExposureClock.stop()
             self.applyExposure()
+            self.restoreFrameDurations()
             self.isExposing = false
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
+    /// A one-second frame needs a one-second video frame to fit in, and Apple
+    /// doesn't say the frame rate comes back by itself once the exposure is
+    /// handed back to the camera. If it didn't, the viewfinder would go on at
+    /// a frame a second — and since coming back to the app restarts the
+    /// session without configuring it again, coming back would look like
+    /// waiting for the camera to start. So with the camera choosing the
+    /// exposure again, the frame durations go back to the format's own.
+    ///
+    /// Not with a pin: a pinned slow shutter still needs its long frames, and
+    /// that is how a slow shutter has always looked here. Queued behind
+    /// `applyExposure`, so auto exposure is back before the frame rate is.
+    private func restoreFrameDurations() {
+        guard shutterSpeed == nil, iso == nil else { return }
+        sessionQueue.async { [weak self] in
+            guard let device = self?.videoDevice else { return }
+            do {
+                try device.lockForConfiguration()
+                device.activeVideoMinFrameDuration = .invalid
+                device.activeVideoMaxFrameDuration = .invalid
+                device.unlockForConfiguration()
+            } catch {
+            }
         }
     }
 

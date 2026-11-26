@@ -289,6 +289,12 @@ exposure is open, and so do the priority modes' corrections: the frames are
 added photosite by photosite, and a frame through other glass, or at another
 exposure, is a different photograph.
 
+When the run ends, the exposure goes back to the pins, or to the camera. With
+the camera choosing, so does the video's frame rate: a one-second frame needs a
+one-second video frame to fit in, Apple doesn't say the rate comes back by
+itself, and a viewfinder left at a frame a second would make coming back to the
+app look like waiting for it to start.
+
 **Ten seconds is not ten times brighter.** The frame comes out as bright as the
 meter asked for, the way a Night mode photograph does. What the extra time buys
 is the other two things a long exposure is for: the noise goes down by the
@@ -309,13 +315,30 @@ system exposed differently from the plan is weighted for what it got. The
 running total is one float per photosite, 48 MB whatever the number of frames,
 and each frame is let go as soon as it has been added.
 
-The frames are added from the pixel buffers AVFoundation hands over, which are
-the sensor data before anything has packaged it. Nothing promises those hold
-exactly the numbers the DNG does, so the first frame is checked. One tile of its
-DNG is decoded — Apple writes them in lossless JPEG, which is what
-`LosslessJPEG` reads — and compared with the same corner of its buffer,
-photosite by photosite. If they disagree the frames aren't added: the first one
-is kept as an ordinary photograph, and the reason is said.
+**Each frame is added as its own DNG holds it.** AVFoundation packages the
+frame, `LosslessJPEG` reads its tiles back — Apple writes them in lossless JPEG
+— on every core at once, and that frame's own black level comes off before it
+goes in. It was added from the pixel buffer AVFoundation hands over beside the
+DNG at first, which is cheaper, but on a phone the two hold different numbers,
+and the DNG's are the ones its black and white levels describe and the ones the
+merge is written back among. The buffer is still set against the DNG on the
+first frame, for one line in the console that says how they differ — whether
+the buffer is the DNG scaled and offset, or something no straight line takes
+one to the other — and nothing is decided by it.
+
+What is decided is whether the first frame reads back as something believable:
+one tile is decoded, and its numbers have to stay inside the white level the
+file itself states. A negative that doesn't — or one that isn't a Bayer DNG at
+all — is kept as an ordinary photograph, and the reason is said. A frame later
+in the run that can't be read ends the run there, with what has been added so
+far.
+
+Reading a frame takes a few hundredths of a second in a release build. A debug
+build — which is what Xcode runs on a phone by default — checks every
+subscript and folds nothing in, and takes about ten times as long. That stays
+behind the shooting for as long as it is shorter than a frame; past that, the
+frames wait for it and the gaps between them grow. A release build is the one
+to judge the gaps by.
 
 ### The negative it makes
 

@@ -20,12 +20,13 @@
 //  gain is less noise for the same light. With either half pinned, the frames are what
 //  the photographer chose.
 //
-//  The frames are added from the pixel buffers AVFoundation hands over, which
-//  are the sensor data before anything is packaged. Nothing promises those
-//  hold exactly the numbers the DNG does, so the first frame is checked: one of
-//  its DNG's tiles is decoded and compared with the same corner of its buffer.
-//  If they disagree, the frames aren't added — the first one is kept as an
-//  ordinary photograph, and the reason is said.
+//  Each frame is added as its own DNG holds it: packaged by AVFoundation,
+//  decoded here, its black level taken off. It used to be added from the pixel
+//  buffer AVFoundation hands over beside the DNG, which is cheaper, but on a
+//  phone the two turned out to hold different numbers — and the DNG's are the
+//  ones its black and white levels describe, and the ones the merge is
+//  written back among. The buffer is still compared with the DNG on the first
+//  frame, for the console, so that what the difference is can be learned.
 //
 
 import AVFoundation
@@ -35,6 +36,7 @@ import CoreVideo
 import Foundation
 import ImageIO
 import QuartzCore
+import os
 
 enum LongExposure {
 
@@ -147,10 +149,11 @@ final class LongExposureClock: ObservableObject {
 /// fraction of a second, depending on the phone, and small beside a one-second
 /// frame.
 ///
-/// Adding a frame to the stack happens on a queue of its own, behind the
-/// shooting rather than in front of it, so the time it takes is never time the
-/// sensor sits closed. No more than two frames wait to be added: a pixel buffer
-/// held is one the camera can't reuse, and the camera only has so many.
+/// Reading a frame and adding it to the stack happen on a queue of their own,
+/// behind the shooting rather than in front of it, so the time they take is not
+/// time the sensor sits closed — unless the stack falls behind. No more than
+/// two frames wait to be added: a frame held is one the camera can't reuse,
+/// and the camera only has so many.
 final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
 
     struct Outcome {
@@ -206,7 +209,6 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
     private var referenceExposure: Double?
     private var raw: DNGRaw?
     private var stack: BayerStack?
-    private var bufferScale: Float = 1
     private var incompatibility: String?
     private var error: Error?
     private var isFinished = false
@@ -313,61 +315,77 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
             return
         }
 
+        let exposure = LongExposureRun.exposure(in: photo.metadata)
+
+        var first: DNGRaw?
         if template == nil {
             // The first frame is the template the merge is written into, and
-            // the test of whether its buffer can be added at all.
+            // the test of whether a frame can be read back at all.
             guard let data = photo.fileDataRepresentation() else {
-                if self.error == nil { self.error = Failure.abandoned("The first frame of the long exposure couldn't be read.") }
+                if self.error == nil {
+                    self.error = Failure.abandoned("The first frame of the long exposure couldn't be read.")
+                }
                 return
             }
             template = data
             templateMetadata = photo.metadata
-            referenceExposure = LongExposureRun.exposure(in: photo.metadata)
+            referenceExposure = exposure
             do {
-                guard let buffer = photo.pixelBuffer else {
-                    throw Incompatible(reason: "the camera didn't hand over its sensor data")
-                }
                 let raw = try DNGRaw(data)
-                bufferScale = try LongExposureRun.scale(of: buffer, against: raw)
+                try LongExposureRun.check(raw, beside: photo.pixelBuffer)
                 self.raw = raw
                 stack = BayerStack(raw: raw)
+                first = raw
             } catch {
                 incompatibility = error.localizedDescription
                 return
             }
         }
 
-        guard let stack, let buffer = photo.pixelBuffer,
-              CVPixelBufferGetWidth(buffer) == stack.width,
-              CVPixelBufferGetHeight(buffer) == stack.height else { return }
+        guard let stack else { return }
 
         // Weighted by the light the frame was set to collect, should the
         // camera have moved its exposure between frames.
-        let relative: Double
-        if let reference = referenceExposure,
-           let exposure = LongExposureRun.exposure(in: photo.metadata) {
+        var relative = 1.0
+        if let reference = referenceExposure, let exposure, reference > 0 {
             relative = exposure / reference
-        } else {
-            relative = 1
         }
+        let weight = relative
+        let firstFrame = first
 
         absorbed += 1
         pendingAdds += 1
-        let scale = bufferScale
         addQueue.async { [self] in
-            CVPixelBufferLockBaseAddress(buffer, .readOnly)
-            if let base = CVPixelBufferGetBaseAddress(buffer) {
-                stack.add(UnsafeRawPointer(base),
-                          bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-                          exposure: relative,
-                          scale: scale)
+            // Packaging a frame as a DNG and reading it back are the slow
+            // halves of it, so both happen here rather than on the run's queue.
+            let failure: Error?
+            do {
+                let raw: DNGRaw
+                if let firstFrame {
+                    raw = firstFrame
+                } else {
+                    guard let data = photo.fileDataRepresentation() else {
+                        throw Failure.abandoned("A frame of the long exposure couldn't be read.")
+                    }
+                    raw = try DNGRaw(data)
+                }
+                try stack.add(raw, exposure: weight)
+                failure = nil
+            } catch {
+                failure = error
             }
-            CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
 
             queue.async { [self] in
                 pendingAdds -= 1
-                if isWaitingForRoom, !isFinished {
-                    isWaitingForRoom = false
+                if let failure, self.error == nil { self.error = failure }
+                guard !isFinished, isWaitingForRoom else { return }
+                isWaitingForRoom = false
+                // Nothing is on the sensor while the run waits for room, so a
+                // failure here is the end of it rather than the next frame's
+                // answer.
+                if self.error != nil {
+                    finish()
+                } else {
                     next()
                 }
             }
@@ -409,23 +427,25 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
             return
         }
 
-        let frames = absorbed
         let measured = (closedAt ?? 0) - (openedAt ?? 0)
         let span = (max(frameSeconds, measured) * 10).rounded() / 10
         let metadata = templateMetadata
         let raw = self.raw
         let stack = self.stack
         let incompatibility = self.incompatibility
+        let failure = error
 
-        let stopped = error.map { error -> String in
-            let count = frames == 1 ? "one frame" : "\(frames) frames"
-            return "The long exposure stopped after \(count): \(error.localizedDescription)"
-        }
-
-        // Behind every add already queued, since this queue is serial.
+        // Behind every add already queued, since this queue is serial — so
+        // what the stack holds by now is everything that will go in.
         addQueue.async { [self] in
-            var note = stopped
-            if let raw, let stack, stack.frames > 0 {
+            let added = stack?.frames ?? 0
+            var note: String?
+            if let failure {
+                note = added > 0
+                    ? "The long exposure stopped after \(added == 1 ? "one frame" : "\(added) frames"): \(failure.localizedDescription)"
+                    : "The long exposure's frames couldn't be read, so the first was kept on its own: \(failure.localizedDescription)"
+            }
+            if let raw, let stack, added > 0 {
                 do {
                     let dng = try raw.replacingImage(with: stack.merged(),
                                                      exposureTime: span,
@@ -439,7 +459,8 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
                     note = "The frames couldn't be merged, so the first was kept on its own. \(error.localizedDescription)"
                 }
             } else if let incompatibility {
-                note = "This camera's RAW frames couldn't be added together, so the first was kept on its own: \(incompatibility)."
+                let reason = incompatibility.hasSuffix(".") ? incompatibility : incompatibility + "."
+                note = "This camera's RAW frames couldn't be added together, so the first was kept on its own: \(reason)"
             }
             completion(.success(Outcome(dng: template, metadata: metadata, frames: 1, note: note)))
         }
@@ -469,50 +490,93 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
         return stamped
     }
 
-    /// Whether a pixel buffer holds the numbers the DNG does, and if so what
-    /// takes one to the other: 1 when they are the same, a half or a quarter
-    /// when the buffer holds them a bit or two higher.
+    /// Whether the first frame's DNG reads back as something believable: one
+    /// tile is decoded, and its numbers must stay within the white level the
+    /// DNG itself states. A decoder that had misread the file would not keep
+    /// to it.
     ///
-    /// Checked on the first tile, decoded out of the DNG and set against the
-    /// same corner of the buffer, photosite by photosite.
-    static func scale(of buffer: CVPixelBuffer, against raw: DNGRaw) throws -> Float {
-        guard !CVPixelBufferIsPlanar(buffer) else {
-            throw Incompatible(reason: "its sensor data comes in planes")
+    /// The pixel buffer is set beside that tile too, but only to say in the
+    /// console how the two differ — nothing is decided by it.
+    static func check(_ raw: DNGRaw, beside buffer: CVPixelBuffer?) throws {
+        let tile = try raw.segmentSamples(0)
+        let white = UInt16(clamping: Int(raw.whiteLevel.rounded()))
+        var over = 0
+        tile.withUnsafeBufferPointer { samples in
+            for sample in samples where sample > white { over += 1 }
         }
+        if over * 1000 > tile.count {
+            throw Incompatible(reason: "its DNG reads back as numbers past its own white level")
+        }
+        if let buffer {
+            log.notice("\(describe(buffer, beside: raw, tile: tile), privacy: .public)")
+        }
+    }
+
+    private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Snap",
+                                    category: "LongExposure")
+
+    /// How a frame's pixel buffer compares with its DNG, as one line: the
+    /// buffer's format and shape, how many of the first tile's photosites are
+    /// the same number in both, and the straight line that best takes the
+    /// DNG's numbers to the buffer's, with how far from it the buffer strays.
+    ///
+    /// A buffer that is the DNG shifted or offset fits the line exactly; one
+    /// with lens shading or defect correction the other lacks does not.
+    static func describe(_ buffer: CVPixelBuffer, beside raw: DNGRaw, tile: [UInt16]) -> String {
+        let type = CVPixelBufferGetPixelFormatType(buffer)
+        let code = String([24, 16, 8, 0].map { Character(UnicodeScalar(UInt8((type >> UInt32($0)) & 0xFF))) })
         let width = CVPixelBufferGetWidth(buffer)
         let height = CVPixelBufferGetHeight(buffer)
-        guard width == raw.width, height == raw.height else {
-            throw Incompatible(reason: "its sensor data is \(width)×\(height) and its DNG \(raw.width)×\(raw.height)")
-        }
         let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        guard bytesPerRow >= width * 2 else {
-            throw Incompatible(reason: "its sensor data isn't 16 bits a photosite")
-        }
+        var line = "Long exposure: pixel buffer '\(code)' \(width)×\(height), \(bytesPerRow) bytes a row; "
+            + "DNG \(raw.width)×\(raw.height), black \(raw.blackLevels), white \(raw.whiteLevel)"
 
-        let rect = raw.segmentRect(0)
-        let tile = try raw.segmentSamples(0)
-        let rows = min(rect.height, height - rect.y)
-        let columns = min(rect.width, width - rect.x)
+        guard width == raw.width, height == raw.height, bytesPerRow >= width * 2,
+              !CVPixelBufferIsPlanar(buffer) else {
+            return line + "; not compared"
+        }
 
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(buffer) else {
-            throw Incompatible(reason: "its sensor data can't be read")
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return line + "; buffer unreadable" }
+
+        let rect = raw.segmentRect(0)
+        let rows = min(rect.height, height - rect.y)
+        let columns = min(rect.width, width - rect.x)
+        func pair(_ row: Int, _ column: Int) -> (dng: Double, buffer: Double) {
+            let samples = (UnsafeRawPointer(base) + (rect.y + row) * bytesPerRow)
+                .assumingMemoryBound(to: UInt16.self)
+            return (Double(tile[row * rect.width + column]), Double(samples[rect.x + column]))
         }
 
-        for shift in 0...4 {
-            var matches = true
-            check: for row in 0..<rows {
-                let line = (UnsafeRawPointer(base) + (rect.y + row) * bytesPerRow)
-                    .assumingMemoryBound(to: UInt16.self)
-                for column in 0..<columns
-                where line[rect.x + column] != tile[row * rect.width + column] << UInt16(shift) {
-                    matches = false
-                    break check
-                }
+        var n = 0.0, sumX = 0.0, sumY = 0.0, sumXX = 0.0, sumXY = 0.0
+        var equal = 0
+        var lowest = Double.infinity, highest = -Double.infinity
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let (x, y) = pair(row, column)
+                n += 1; sumX += x; sumY += y; sumXX += x * x; sumXY += x * y
+                if x == y { equal += 1 }
+                lowest = min(lowest, y); highest = max(highest, y)
             }
-            if matches { return 1 / Float(1 << shift) }
         }
-        throw Incompatible(reason: "its sensor data and its DNG hold different numbers")
+        guard n > 1 else { return line + "; nothing to compare" }
+        let spread = n * sumXX - sumX * sumX
+        let slope = spread != 0 ? (n * sumXY - sumX * sumY) / spread : 0
+        let offset = (sumY - slope * sumX) / n
+
+        var squares = 0.0, worst = 0.0
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let (x, y) = pair(row, column)
+                let residual = abs(y - (slope * x + offset))
+                squares += residual * residual
+                worst = max(worst, residual)
+            }
+        }
+
+        line += String(format: "; first tile: %.2f%% equal, buffer ≈ %.4f × DNG %+.1f, rms off by %.2f, worst %.1f, buffer %.0f–%.0f",
+                       Double(equal) / n * 100, slope, offset, (squares / n).squareRoot(), worst, lowest, highest)
+        return line
     }
 }

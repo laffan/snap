@@ -10,11 +10,12 @@
 //  the numbers come back exactly. Apple writes a Bayer negative's sensor image
 //  as tiles of it.
 //
-//  Snap needs it for one thing: reading a tile of the first frame of a long
-//  exposure back out of its DNG, to check that the pixel buffer AVFoundation
-//  handed over holds the same numbers the file does. Everything after that
-//  works on the pixel buffers and never decodes anything, so this is written to
-//  be plain rather than fast.
+//  Snap reads every frame of a long exposure back out of its DNG through
+//  this, all of its tiles at once, so it is written to be quick in a debug
+//  build as well as a release one — see `decodeScan`. Checked against LibRaw,
+//  photosite for photosite, on the Bayer negatives of five iPhones from the 6s
+//  Plus to the XS, which Apple wrote the same way throughout: twelve-bit
+//  samples, two interleaved components a row, predictor 1.
 //
 //  What a DNG uses is all that is supported: one frame, every component in one
 //  scan, any of the seven predictors, any precision up to 16 bits. Restart
@@ -146,6 +147,15 @@ enum LosslessJPEG {
 
     // MARK: - The scan
 
+    /// The entropy-coded data, sample by sample.
+    ///
+    /// Written with plain pointers and the bit reading inlined, because this
+    /// runs over every photosite of every frame of a long exposure, and a debug
+    /// build — which is what runs from Xcode — checks every array subscript
+    /// and calls every small method rather than folding it in. That made a
+    /// frame take longer to read than to take. The shifts are the masking kind
+    /// for the same reason: the ordinary ones are generic, and unoptimised a
+    /// generic call is what each of them becomes.
     private static func decodeScan(_ data: UnsafeBufferPointer<UInt8>,
                                    frame: Frame,
                                    tables: [Huffman],
@@ -154,48 +164,106 @@ enum LosslessJPEG {
         let components = frame.components
         let rowLength = frame.width * components
         var samples = [UInt16](repeating: 0, count: rowLength * frame.height)
-        var reader = BitReader(data)
         // The first sample of the first row is predicted from the middle of the
         // range, since there is nothing before it to predict from.
         let initial = 1 << (frame.precision - pointTransform - 1)
 
-        try samples.withUnsafeMutableBufferPointer { out in
-            for row in 0..<frame.height {
-                let rowStart = row * rowLength
-                for column in 0..<frame.width {
-                    for component in 0..<components {
-                        let index = rowStart + column * components + component
-                        let difference = try reader.difference(using: tables[component])
+        // Every component's table end to end, so one pointer reaches them all.
+        var lookups = [UInt16]()
+        lookups.reserveCapacity(components << 16)
+        for table in tables { lookups.append(contentsOf: table.lookup) }
 
-                        let prediction: Int
-                        if row == 0 && column == 0 {
-                            prediction = initial
-                        } else if row == 0 {
-                            prediction = Int(out[index - components])
-                        } else if column == 0 {
-                            prediction = Int(out[index - rowLength])
-                        } else {
-                            let left = Int(out[index - components])
-                            let above = Int(out[index - rowLength])
-                            let corner = Int(out[index - rowLength - components])
-                            switch predictor {
-                            case 1: prediction = left
-                            case 2: prediction = above
-                            case 3: prediction = corner
-                            case 4: prediction = left + above - corner
-                            case 5: prediction = left + ((above - corner) >> 1)
-                            case 6: prediction = above + ((left - corner) >> 1)
-                            default: prediction = (left + above) >> 1
+        guard let input = data.baseAddress else { throw Failure.malformed("no scan data") }
+        let end = data.count
+
+        try samples.withUnsafeMutableBufferPointer { buffer in
+            try lookups.withUnsafeBufferPointer { lookupBuffer in
+                guard let out = buffer.baseAddress, let lookup = lookupBuffer.baseAddress else { return }
+
+                var position = 0
+                /// The next bits, from the top down, and how many of them are real.
+                var bits: UInt64 = 0
+                var available = 0
+                var index = 0
+
+                for row in 0..<frame.height {
+                    for column in 0..<frame.width {
+                        for component in 0..<components {
+                            // Enough for a code and its bits — sixteen and
+                            // fifteen at most — with one refill. JPEG stuffs a
+                            // zero after every 0xFF; any other byte after one is
+                            // a marker, which ends the data and reads as zeros.
+                            while available <= 56 {
+                                var byte: UInt8 = 0
+                                if position < end {
+                                    byte = input[position]
+                                    if byte == 0xFF {
+                                        if position + 1 < end, input[position + 1] == 0 {
+                                            position += 2
+                                        } else {
+                                            byte = 0
+                                        }
+                                    } else {
+                                        position += 1
+                                    }
+                                }
+                                bits |= UInt64(truncatingIfNeeded: byte) &<< UInt64(truncatingIfNeeded: 56 - available)
+                                available &+= 8
                             }
+
+                            let entry = lookup[(component &<< 16) | Int(truncatingIfNeeded: bits &>> 48)]
+                            guard entry != 0 else { throw Failure.malformed("a code that isn't in its table") }
+                            let length = Int(truncatingIfNeeded: entry &>> 8)
+                            bits = bits &<< UInt64(truncatingIfNeeded: length)
+                            available &-= length
+
+                            // How many bits the difference has, then those bits.
+                            // Sixteen is the one size with none after it.
+                            let size = Int(truncatingIfNeeded: entry & 0xFF)
+                            var difference = 0
+                            if size == 16 {
+                                difference = 32768
+                            } else if size > 0 {
+                                guard size < 16 else { throw Failure.malformed("a difference of \(size) bits") }
+                                let value = Int(truncatingIfNeeded: bits &>> UInt64(truncatingIfNeeded: 64 &- size))
+                                bits = bits &<< UInt64(truncatingIfNeeded: size)
+                                available &-= size
+                                difference = value < (1 &<< (size &- 1)) ? value &- (1 &<< size) &+ 1 : value
+                            }
+
+                            let prediction: Int
+                            if row == 0 {
+                                prediction = column == 0 ? initial : Int(out[index - components])
+                            } else if column == 0 {
+                                prediction = Int(out[index - rowLength])
+                            } else if predictor == 1 {
+                                // What Apple writes, so the one worth not branching past.
+                                prediction = Int(out[index - components])
+                            } else {
+                                let left = Int(out[index - components])
+                                let above = Int(out[index - rowLength])
+                                let corner = Int(out[index - rowLength - components])
+                                switch predictor {
+                                case 2: prediction = above
+                                case 3: prediction = corner
+                                case 4: prediction = left + above - corner
+                                case 5: prediction = left + ((above - corner) >> 1)
+                                case 6: prediction = above + ((left - corner) >> 1)
+                                default: prediction = (left + above) >> 1
+                                }
+                            }
+                            // Arithmetic is modulo 2¹⁶, which is how a difference
+                            // of 32768 wraps round to anything.
+                            out[index] = UInt16(truncatingIfNeeded: prediction &+ difference)
+                            index &+= 1
                         }
-                        // Arithmetic is modulo 2¹⁶, which is how a difference
-                        // of 32768 wraps round to anything.
-                        out[index] = UInt16(truncatingIfNeeded: prediction + difference)
                     }
                 }
-            }
-            if pointTransform > 0 {
-                for index in out.indices { out[index] <<= UInt16(pointTransform) }
+
+                if pointTransform > 0 {
+                    let shift = UInt16(pointTransform)
+                    for at in 0..<index { out[at] <<= shift }
+                }
             }
         }
         return samples
@@ -209,98 +277,32 @@ enum LosslessJPEG {
         /// Length in the high byte, symbol in the low; zero for no code.
         let lookup: [UInt16]
 
+        /// Every tile brings tables of its own, so this is built 128 times a
+        /// frame — each code's run of entries is filled in one go rather than
+        /// one subscript at a time.
         init(lengths: [Int], symbols: [UInt8]) throws {
             var lookup = [UInt16](repeating: 0, count: 1 << 16)
-            var code = 0
-            var next = 0
-            for length in 1...16 {
-                for _ in 0..<lengths[length - 1] {
-                    let shift = 16 - length
-                    let start = code << shift
-                    let end = (code + 1) << shift
-                    guard end <= lookup.count, next < symbols.count else {
-                        throw Failure.malformed("a Huffman table with too many codes")
+            try lookup.withUnsafeMutableBufferPointer { buffer in
+                guard let table = buffer.baseAddress else { return }
+                var code = 0
+                var next = 0
+                for length in 1...16 {
+                    for _ in 0..<lengths[length - 1] {
+                        let shift = 16 - length
+                        let start = code << shift
+                        let end = (code + 1) << shift
+                        guard end <= buffer.count, next < symbols.count else {
+                            throw Failure.malformed("a Huffman table with too many codes")
+                        }
+                        let entry = UInt16(length << 8 | Int(symbols[next]))
+                        (table + start).update(repeating: entry, count: end - start)
+                        code += 1
+                        next += 1
                     }
-                    let entry = UInt16(length << 8 | Int(symbols[next]))
-                    for index in start..<end { lookup[index] = entry }
-                    code += 1
-                    next += 1
+                    code <<= 1
                 }
-                code <<= 1
             }
             self.lookup = lookup
-        }
-    }
-
-    // MARK: - Bits
-
-    /// The entropy-coded data, a bit at a time, with JPEG's stuffed zero after
-    /// every 0xFF taken back out. A marker ends it, after which it reads zeros.
-    private struct BitReader {
-        private let data: UnsafeBufferPointer<UInt8>
-        private var position = 0
-        /// The next bits, from the top down.
-        private var buffer: UInt64 = 0
-        private var available = 0
-
-        init(_ data: UnsafeBufferPointer<UInt8>) {
-            self.data = data
-        }
-
-        private mutating func refill() {
-            while available <= 56 {
-                var byte: UInt8 = 0
-                if position < data.count {
-                    byte = data[position]
-                    if byte == 0xFF {
-                        let following: UInt8 = position + 1 < data.count ? data[position + 1] : 0xD9
-                        if following == 0x00 {
-                            position += 2
-                        } else {
-                            // A marker: the data is over. Stay put and read zeros.
-                            byte = 0
-                        }
-                    } else {
-                        position += 1
-                    }
-                }
-                buffer |= UInt64(byte) << UInt64(56 - available)
-                available += 8
-            }
-        }
-
-        private mutating func take(_ count: Int) -> Int {
-            guard count > 0 else { return 0 }
-            refill()
-            let value = Int(buffer >> UInt64(64 - count))
-            buffer <<= UInt64(count)
-            available -= count
-            return value
-        }
-
-        /// One coded difference: a Huffman code for how many bits it has, then
-        /// those bits.
-        mutating func difference(using table: Huffman) throws -> Int {
-            refill()
-            let entry = table.lookup[Int(buffer >> 48)]
-            guard entry != 0 else { throw Failure.malformed("a code that isn't in its table") }
-            let length = Int(entry >> 8)
-            buffer <<= UInt64(length)
-            available -= length
-
-            let size = Int(entry & 0xFF)
-            switch size {
-            case 0:
-                return 0
-            case 16:
-                // The one size with no bits after it.
-                return 32768
-            case 1...15:
-                let bits = take(size)
-                return bits < (1 << (size - 1)) ? bits - (1 << size) + 1 : bits
-            default:
-                throw Failure.malformed("a difference of \(size) bits")
-            }
         }
     }
 }
