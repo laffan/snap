@@ -582,16 +582,6 @@ struct CameraView: View {
             if isDeveloping {
                 captureButton
                     .transition(.opacity)
-            } else if viewing == nil, camera.isLongExposureOn {
-                // In the middle of the row the eye is already on, under the
-                // frame being exposed.
-                LongExposureCountdown(camera: camera, clock: camera.longExposureClock)
-            } else if viewing == nil, camera.isDoubleExposureOn {
-                Text(camera.isHoldingExposure ? "SECOND EXPOSURE" : "FIRST EXPOSURE")
-                    .font(.system(size: 10, weight: .medium))
-                    .tracking(1.1)
-                    .foregroundStyle(.white.opacity(camera.isHoldingExposure ? 0.85 : 0.5))
-                    .animation(.easeOut(duration: 0.12), value: camera.isHoldingExposure)
             }
         }
         // The inset is 8 here and 6 inside the readout, so both numbers still
@@ -717,7 +707,7 @@ struct CameraView: View {
             // Above the shutter, since they decide how the next photograph is
             // taken. Held in place but hidden while a saved frame is up, for
             // the same reason the lens dots are.
-            SubProfileToggles(look: camera.look)
+            modeRow
                 .opacity(viewing == nil ? 1 : 0)
                 .allowsHitTesting(viewing == nil)
 
@@ -752,8 +742,9 @@ struct CameraView: View {
                 .offset(x: 56)
             } else {
                 // Busy only while a frame is coming off the sensor, or once ten
-                // are waiting to be developed — see `CaptureBuffer`.
-                ShutterButton(isBusy: camera.isShutterBusy) { camera.capture() }
+                // are waiting to be developed — see `CaptureBuffer`. Its ring
+                // says where a long or double exposure has got to.
+                ShutterControl(camera: camera)
 
                 Button {
                     camera.capturePreviewFrame()
@@ -965,17 +956,16 @@ struct CameraView: View {
                        subProfiles: shot.profile.activeSubProfiles)
     }
 
-    /// One dot per lens, widening left to right the way the lenses do, then
-    /// the macro flower, the long-exposure hourglass and the double-exposure
-    /// squares, centred under the shutter together. The dots are hidden on a single-camera device, where
-    /// there is nothing to choose; the hourglass stays wherever there is RAW.
+    /// One dot per lens, widening left to right the way the lenses do, and
+    /// the macro flower after them, centred under the shutter together. Hidden on a single-camera device, where there is
+    /// nothing to choose.
     @ViewBuilder
     private var lensPicker: some View {
-        if camera.lenses.count > 1 || camera.isLongExposureAvailable {
-            // The dots, the flower and the hourglass are centred as one row,
-            // each of the last two counted as one more stop along it.
+        if camera.lenses.count > 1 {
+            // The dots and the flower are centred as one row, the flower
+            // counted as a fourth stop along it.
             HStack(spacing: 0) {
-                ForEach(Array(selectableLenses.enumerated()), id: \.element.id) { index, lens in
+                ForEach(Array(camera.lenses.enumerated()), id: \.element.id) { index, lens in
                     let diameter = 7 + CGFloat(index) * 3.5
                     let isCurrent = lens == camera.currentLens
 
@@ -1003,29 +993,48 @@ struct CameraView: View {
                 if camera.isMacroAvailable {
                     macroToggle
                 }
-
-                // And one more after that: like macro, it decides how the next
-                // photograph is taken rather than which glass it goes through.
-                if camera.isLongExposureAvailable {
-                    longExposureToggle
-                }
-
-                // The same kind of switch again, so it sits in the same row.
-                if camera.isDoubleExposureAvailable {
-                    doubleExposureToggle
-                }
             }
         }
-    }
-
-    /// The lenses worth a dot: none at all when there is only one.
-    private var selectableLenses: [CameraModel.Lens] {
-        camera.lenses.count > 1 ? camera.lenses : []
     }
 
     /// The width each lens dot is given to be tapped in, and the flower after
     /// them the same, so it sits in the row as one more stop along it.
     private static let lensCellWidth: CGFloat = 26
+
+    /// How far from the middle of the row the outer edges of the two round
+    /// buttons beside the shutter are: each is 38 across, centred 68 out.
+    private static let sideButtonEdge: CGFloat = 68 + 19
+
+    /// The row above the shutter: the photograph's modes at the left and the
+    /// shutter's at the right.
+    ///
+    /// Each group is lined up with the round button below it — the house's
+    /// left edge on the black-and-white disc's, the hourglass's left edge on
+    /// PS's right — so the two rows read as one arrangement rather than as a
+    /// row of switches floating over another of buttons. The sub-profiles
+    /// change what the photograph looks like; the shutter's modes change how
+    /// it is taken. They used to be in the lens row, which is about glass.
+    private var modeRow: some View {
+        ZStack {
+            // The row's own width, so both groups are inside it — an offset
+            // moves where a view is drawn and touched, not the room its
+            // parent makes for it.
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: 26)
+
+            SubProfileToggles(look: camera.look)
+                .frame(width: SubProfileToggles.width, alignment: .leading)
+                .offset(x: -CameraView.sideButtonEdge + SubProfileToggles.width / 2)
+
+            if camera.isLongExposureAvailable {
+                ShutterModeToggles(camera: camera)
+                    .frame(width: ShutterModeToggles.width, alignment: .leading)
+                    .offset(x: CameraView.sideButtonEdge + ShutterModeToggles.width / 2)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
 
     /// The flower Apple's Camera uses for the same thing, lit in the accent
     /// while it is on — it is a setting that changes the photograph, which is
@@ -1044,49 +1053,6 @@ struct CameraView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Macro")
         .accessibilityValue(camera.isMacroOn ? "On" : "Off")
-    }
-
-    /// An hourglass, lit in the accent while long exposure is on. On, the
-    /// wheel at the right of the shutter becomes the time the shutter stays
-    /// open, and the shutter takes that long. Held still while one is being
-    /// taken, since the run is already using what it set.
-    private var longExposureToggle: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            camera.toggleLongExposure()
-        } label: {
-            Image(systemName: "hourglass")
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(camera.isLongExposureOn ? Color.snapAccent : .white.opacity(0.55))
-                .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(camera.isExposing)
-        .accessibilityLabel("Long exposure")
-        .accessibilityValue(camera.isLongExposureOn ? "On" : "Off")
-    }
-
-    /// Two squares, one over the other, lit while double exposure is on and
-    /// filled in once the first exposure is held — which is when the ghost is
-    /// over the frame and the next press finishes the photograph. Tapping it
-    /// then ends the double exposure, and the first is kept on its own.
-    private var doubleExposureToggle: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            camera.toggleDoubleExposure()
-        } label: {
-            Image(systemName: camera.isHoldingExposure ? "square.filled.on.square" : "square.on.square")
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(camera.isDoubleExposureOn ? Color.snapAccent : .white.opacity(0.55))
-                .frame(width: CameraView.lensCellWidth, height: CameraView.controlCellHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(camera.isExposing)
-        .accessibilityLabel("Double exposure")
-        .accessibilityValue(camera.isHoldingExposure ? "First exposure taken"
-                            : camera.isDoubleExposureOn ? "On" : "Off")
     }
 
     @ViewBuilder
@@ -1695,8 +1661,15 @@ private struct SubProfileToggles: View {
 
     @ObservedObject var look: LookModel
 
+    /// Each glyph's target, and the space between them.
+    static let cellWidth: CGFloat = 36
+    static let spacing: CGFloat = 8
+    static var width: CGFloat {
+        CGFloat(SubProfile.allCases.count) * cellWidth + CGFloat(SubProfile.allCases.count - 1) * spacing
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: SubProfileToggles.spacing) {
             ForEach(SubProfile.allCases) { subProfile in
                 let isOn = look.profile.subProfiles.contains(subProfile)
 
@@ -1707,8 +1680,10 @@ private struct SubProfileToggles: View {
                     Image(systemName: subProfile.symbol)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(isOn ? Color.snapAccent : .white.opacity(0.5))
-                        // Small glyphs, ordinary-sized targets.
-                        .frame(width: 36, height: 26)
+                        // Small glyphs, ordinary-sized targets — with the
+                        // glyph at the front of its target, so the first one's
+                        // edge is the row's edge.
+                        .frame(width: SubProfileToggles.cellWidth, height: 26, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1717,6 +1692,110 @@ private struct SubProfileToggles: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: look.profile.subProfiles)
+    }
+}
+
+/// Long exposure and double exposure, at the right of the row above the
+/// shutter: an hourglass, and two squares one over the other. Each is lit in
+/// the accent while it is on, and the two are one or the other. The squares
+/// fill in while a first exposure waits, and tapping them then ends the double
+/// exposure with the first kept on its own. Neither can be changed while a
+/// frame is on the sensor.
+///
+/// The same glyph size and targets as the sub-profiles beside them, glyphs at
+/// the front of their targets the same way, since they share the row.
+private struct ShutterModeToggles: View {
+
+    @ObservedObject var camera: CameraModel
+
+    static var width: CGFloat { 2 * SubProfileToggles.cellWidth + SubProfileToggles.spacing }
+
+    var body: some View {
+        HStack(spacing: SubProfileToggles.spacing) {
+            toggle(symbol: "hourglass",
+                   label: "Long exposure",
+                   value: camera.isLongExposureOn ? "On" : "Off",
+                   isOn: camera.isLongExposureOn) {
+                camera.toggleLongExposure()
+            }
+
+            toggle(symbol: camera.isHoldingExposure ? "square.filled.on.square" : "square.on.square",
+                   label: "Double exposure",
+                   value: camera.isHoldingExposure ? "First exposure taken"
+                       : camera.isDoubleExposureOn ? "On" : "Off",
+                   isOn: camera.isDoubleExposureOn) {
+                camera.toggleDoubleExposure()
+            }
+        }
+        .disabled(camera.isExposing)
+        .animation(.easeOut(duration: 0.12), value: camera.isLongExposureOn)
+        .animation(.easeOut(duration: 0.12), value: camera.isDoubleExposureOn)
+    }
+
+    private func toggle(symbol: String,
+                        label: String,
+                        value: String,
+                        isOn: Bool,
+                        action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isOn ? Color.snapAccent : .white.opacity(0.5))
+                .frame(width: SubProfileToggles.cellWidth, height: 26, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
+    }
+}
+
+/// The shutter, wearing whatever ring the shutter's mode gives it.
+///
+/// A plain ring ordinarily; for a long exposure, a ring that fills as the time
+/// passes, around a grey disc counting the seconds down; for a double
+/// exposure, two halves lit as the two are taken. Each is its own view so that
+/// only the shutter watches what it shows — a long exposure's ring is redrawn
+/// every frame, and nothing else on the screen needs to be.
+private struct ShutterControl: View {
+
+    @ObservedObject var camera: CameraModel
+
+    var body: some View {
+        if camera.isLongExposureOn {
+            LongExposureShutter(camera: camera, clock: camera.longExposureClock)
+        } else if camera.isDoubleExposureOn {
+            ShutterButton(isBusy: camera.isShutterBusy,
+                          ring: .halves(first: camera.doubleExposuresTaken >= 1,
+                                        second: camera.doubleExposuresTaken >= 2)) {
+                camera.capture()
+            }
+        } else {
+            ShutterButton(isBusy: camera.isShutterBusy) { camera.capture() }
+        }
+    }
+}
+
+/// The long exposure's shutter. The ring is drawn from when the exposure
+/// opened and how long it lasts, on a timeline that only runs while it is
+/// open, so it fills smoothly rather than a second at a time; the count in the
+/// disc is the clock's.
+private struct LongExposureShutter: View {
+
+    @ObservedObject var camera: CameraModel
+    @ObservedObject var clock: LongExposureClock
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: clock.window == nil)) { context in
+            ShutterButton(isBusy: camera.isShutterBusy,
+                          ring: .progress(clock.progress(at: context.date)),
+                          count: clock.remaining.map { String($0) }) {
+                camera.capture()
+            }
+        }
     }
 }
 
@@ -1747,28 +1826,6 @@ private struct ExposureControl: View {
         } else {
             ExposureWheel(value: $camera.exposureBias, scale: .compensation)
         }
-    }
-}
-
-/// The time left, under the frame, while a long exposure is open — and the
-/// time it will take, dimmer, while it isn't yet. The readout beside the wheel
-/// counts down too, but it is small and at the edge of the screen, and this is
-/// where somebody waiting on a tripod is looking.
-private struct LongExposureCountdown: View {
-
-    @ObservedObject var camera: CameraModel
-    @ObservedObject var clock: LongExposureClock
-
-    var body: some View {
-        let remaining = clock.remaining
-        Text("\(remaining ?? camera.longExposureSeconds)s")
-            .font(.system(size: 15, weight: .semibold))
-            .monospacedDigit()
-            .foregroundStyle(remaining == nil ? Color.white.opacity(0.4) : Color.white)
-            .contentTransition(.numericText(countsDown: true))
-            .animation(.easeOut(duration: 0.2), value: remaining)
-            .accessibilityLabel(remaining.map { "\($0) seconds left" }
-                                ?? "Long exposure, \(camera.longExposureSeconds) seconds")
     }
 }
 

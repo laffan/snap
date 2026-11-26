@@ -19,6 +19,15 @@
 //  launch was left by a run that was ended, and is developed once the camera
 //  is up.
 //
+//  Two kinds of frame arrive differently. A double exposure comes as two
+//  negatives, and the buffer adds them as the first step of developing them —
+//  in memory, every time a development starts, so a development cut short and
+//  started again begins from the same two files rather than from a half-done
+//  merge. A long exposure has its place in the roll reserved the moment its
+//  last frame is off the sensor, and is filled once its frames have been added
+//  up behind the shutter: the ring is there from the press's end, not from
+//  whenever the sum happens to be written.
+//
 //  Developing reaches for the GPU, which an app in the background may not do.
 //  So the buffer stops when the camera stops and starts again when the camera
 //  is back, and a frame caught halfway is developed again from the beginning
@@ -65,11 +74,20 @@ final class CaptureBuffer: ObservableObject {
         let id: UUID
         let takenAt: Date
         let data: Data
+        /// A double exposure's second negative, added to the first before the
+        /// frame is developed. Nil for every other frame.
+        let second: Data?
         let isRAW: Bool
         /// The capture's own metadata, with the coordinate added as it came
         /// off the sensor.
         let metadata: [String: Any]
         let profile: PositiveFilmProfile
+
+        /// The same frame with one negative in place of whatever it had.
+        func replacingData(_ data: Data) -> Negative {
+            Negative(id: id, takenAt: takenAt, data: data, second: nil, isRAW: isRAW,
+                     metadata: metadata, profile: profile)
+        }
     }
 
     /// Newest first, the way the roll runs. Main thread only.
@@ -121,19 +139,18 @@ final class CaptureBuffer: ObservableObject {
     /// Called on the photo output's own queue, and written before it returns:
     /// once this is back the frame is on disk, nothing has to hold its tens of
     /// megabytes in memory, and the shutter can be let go.
+    ///
+    /// `second` is a double exposure's other negative: both are written, and
+    /// added together when the frame's turn comes.
     func admit(data: Data,
                isRAW: Bool,
                metadata: [String: Any],
                profile: PositiveFilmProfile,
-               takenAt: Date) throws {
+               takenAt: Date,
+               second: Data? = nil) throws {
         let id = UUID()
-        try data.write(to: dataURL(id, isRAW: isRAW))
-        do {
-            try writeRecord(id: id, takenAt: takenAt, isRAW: isRAW, profile: profile, metadata: metadata)
-        } catch {
-            try? FileManager.default.removeItem(at: dataURL(id, isRAW: isRAW))
-            throw error
-        }
+        try write(id, data: data, second: second, isRAW: isRAW, metadata: metadata,
+                  profile: profile, takenAt: takenAt)
 
         let expected = locked { expectedDuration }
         DispatchQueue.main.async { [weak self] in
@@ -142,6 +159,67 @@ final class CaptureBuffer: ObservableObject {
         queue.async { [weak self] in
             self?.waiting.append(id)
             self?.drain()
+        }
+    }
+
+    /// A place in the roll for a frame whose negative isn't made yet — a long
+    /// exposure whose frames are still being added up. Its ring goes in now,
+    /// counting towards the ten, and `fill` puts the negative behind it. Any
+    /// thread.
+    func reserve(takenAt: Date) -> UUID {
+        let id = UUID()
+        let expected = locked { expectedDuration }
+        DispatchQueue.main.async { [weak self] in
+            self?.frames.insert(Frame(id: id, takenAt: takenAt, startedAt: nil, expected: expected), at: 0)
+        }
+        return id
+    }
+
+    /// The negative for a place `reserve` kept, which then waits its turn like
+    /// any other.
+    func fill(_ id: UUID,
+              data: Data,
+              metadata: [String: Any],
+              profile: PositiveFilmProfile,
+              takenAt: Date) throws {
+        do {
+            try write(id, data: data, second: nil, isRAW: true, metadata: metadata,
+                      profile: profile, takenAt: takenAt)
+        } catch {
+            release(id)
+            throw error
+        }
+        queue.async { [weak self] in
+            self?.waiting.append(id)
+            self?.drain()
+        }
+    }
+
+    /// A reserved place that will never be filled: its ring goes.
+    func release(_ id: UUID) {
+        DispatchQueue.main.async { [weak self] in
+            self?.frames.removeAll { $0.id == id }
+        }
+    }
+
+    /// The negative, and its second if it has one, and then the record — so a
+    /// record on disk always means a whole frame.
+    private func write(_ id: UUID,
+                       data: Data,
+                       second: Data?,
+                       isRAW: Bool,
+                       metadata: [String: Any],
+                       profile: PositiveFilmProfile,
+                       takenAt: Date) throws {
+        let fileManager = FileManager.default
+        do {
+            try data.write(to: dataURL(id, isRAW: isRAW))
+            if let second { try second.write(to: secondURL(id)) }
+            try writeRecord(id: id, takenAt: takenAt, isRAW: isRAW, profile: profile, metadata: metadata)
+        } catch {
+            try? fileManager.removeItem(at: dataURL(id, isRAW: isRAW))
+            try? fileManager.removeItem(at: secondURL(id))
+            throw error
         }
     }
 
@@ -183,7 +261,7 @@ final class CaptureBuffer: ObservableObject {
     private func develop(_ id: UUID, generation: Int) -> Bool {
         guard let developer else { return false }
 
-        guard let negative = negative(id) else {
+        guard var negative = negative(id) else {
             discard(id)
             developer.report(RAWDeveloper.DevelopError.undecodable)
             return true
@@ -195,6 +273,21 @@ final class CaptureBuffer: ObservableObject {
             buffer.update(id) { frame in
                 frame.startedAt = started
                 frame.expected = expected
+            }
+        }
+
+        // A double exposure's two negatives become one before anything else
+        // happens to them. Should they refuse to add, both are kept as
+        // photographs of their own rather than either lost.
+        if let second = negative.second {
+            do {
+                negative = negative.replacingData(try DoubleExposure.merge(negative.data, second))
+            } catch {
+                developer.report(error)
+                try? admit(data: second, isRAW: true, metadata: negative.metadata,
+                           profile: negative.profile, takenAt: negative.takenAt)
+                try? FileManager.default.removeItem(at: secondURL(id))
+                negative = negative.replacingData(negative.data)
             }
         }
 
@@ -233,6 +326,7 @@ final class CaptureBuffer: ObservableObject {
         let fileManager = FileManager.default
         try? fileManager.removeItem(at: dataURL(id, isRAW: true))
         try? fileManager.removeItem(at: dataURL(id, isRAW: false))
+        try? fileManager.removeItem(at: secondURL(id))
         try? fileManager.removeItem(at: recordURL(id))
         onMain { buffer in buffer.frames.removeAll { $0.id == id } }
     }
@@ -251,6 +345,12 @@ final class CaptureBuffer: ObservableObject {
 
     private func dataURL(_ id: UUID, isRAW: Bool) -> URL {
         directory.appendingPathComponent("\(id.uuidString).\(isRAW ? "dng" : "photo")")
+    }
+
+    /// A double exposure's second negative. Named for the same id, so the
+    /// clear-out at launch counts it as part of its frame.
+    private func secondURL(_ id: UUID) -> URL {
+        directory.appendingPathComponent("\(id.uuidString).dng2")
     }
 
     private func recordURL(_ id: UUID) -> URL {
@@ -324,6 +424,7 @@ final class CaptureBuffer: ObservableObject {
         return Negative(id: id,
                         takenAt: record.takenAt,
                         data: data,
+                        second: try? Data(contentsOf: secondURL(id)),
                         isRAW: record.isRAW,
                         metadata: metadata,
                         profile: record.profile)

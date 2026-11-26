@@ -252,35 +252,42 @@ struct DNGRaw {
 
     /// The whole sensor image, decoded, row by row with no padding.
     ///
-    /// Every strip or tile is its own lossless JPEG, so they are read on every
-    /// core at once, each into its own part of the image.
+    /// Every strip or tile is its own lossless JPEG, so they are read several
+    /// at once — on half the phone's cores rather than all of them, since this
+    /// happens while the camera is up, and the viewfinder and a finger on the
+    /// screen need cores of their own to stay smooth.
     func decodedImage() throws -> [UInt16] {
         var image = [UInt16](repeating: 0, count: width * height)
         let lock = NSLock()
         var failure: Error?
         let width = self.width
         let height = self.height
+        let count = segmentCount
+        let workers = max(1, min(count, (ProcessInfo.processInfo.activeProcessorCount + 1) / 2))
 
         image.withUnsafeMutableBufferPointer { buffer in
             guard let base = buffer.baseAddress else { return }
-            DispatchQueue.concurrentPerform(iterations: segmentCount) { index in
-                do {
-                    let rect = segmentRect(index)
-                    let rows = min(rect.height, height - rect.y)
-                    let columns = min(rect.width, width - rect.x)
-                    guard rows > 0, columns > 0 else { return }
-                    let samples = try segmentSamples(index)
-                    samples.withUnsafeBufferPointer { tile in
-                        guard let source = tile.baseAddress else { return }
-                        for row in 0..<rows {
-                            (base + (rect.y + row) * width + rect.x)
-                                .update(from: source + row * rect.width, count: columns)
+            DispatchQueue.concurrentPerform(iterations: workers) { worker in
+                for index in stride(from: worker, to: count, by: workers) {
+                    do {
+                        let rect = segmentRect(index)
+                        let rows = min(rect.height, height - rect.y)
+                        let columns = min(rect.width, width - rect.x)
+                        guard rows > 0, columns > 0 else { continue }
+                        let samples = try segmentSamples(index)
+                        samples.withUnsafeBufferPointer { tile in
+                            guard let source = tile.baseAddress else { return }
+                            for row in 0..<rows {
+                                (base + (rect.y + row) * width + rect.x)
+                                    .update(from: source + row * rect.width, count: columns)
+                            }
                         }
+                    } catch {
+                        lock.lock()
+                        if failure == nil { failure = error }
+                        lock.unlock()
+                        return
                     }
-                } catch {
-                    lock.lock()
-                    if failure == nil { failure = error }
-                    lock.unlock()
                 }
             }
         }

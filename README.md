@@ -221,7 +221,10 @@ The wall, the viewer and a swipe along the roll find a frame once it has landed
 and not before.
 
 **Only the shutter goes through it** — the ring, either volume button, and
-StreetPad. PS was never slow. The develop panel's **CAPTURE**, **Save Settings**
+StreetPad, in long and double exposures as well as single frames. A double
+exposure arrives as two negatives, added together when its turn comes; a long
+exposure has its place in the roll kept from the moment its last frame is
+taken, and is filled once its frames are added up. PS was never slow. The develop panel's **CAPTURE**, **Save Settings**
 and **Capture Version** are made start to finish while you wait, as they always
 were, and they wait for the buffer to be empty before they start, for the same
 reason the buffer develops one frame at a time.
@@ -250,17 +253,38 @@ list in its place.
 
 ## Long exposure
 
-**The hourglass after the macro flower** turns the shutter into a long one.
-While it is lit, the wheel beside the frame stops being exposure compensation
-and becomes how long the shutter stays open: two seconds to thirty, a click a
-second, a number every five. Double-tapping it puts it back to ten.
+**The hourglass** turns the shutter into a long one. It is at the right of the
+row above the shutter — see [The row above the shutter](#the-row-above-the-shutter)
+— and while it is lit, the wheel beside the frame stops being exposure
+compensation and becomes how long the shutter stays open: two seconds to
+thirty, a click a second, a number every five. Double-tapping it puts it back
+to ten.
 
-**The time is written under the frame**, in the middle of the row directly
-below it, dim while nothing is being taken. Press the shutter and it counts
-down there, bright, while the shutter dims — the readout beside the wheel counts
-down too, but it is small and at the edge of the screen, and under the frame is
-where somebody waiting by a tripod is looking. When it reaches the end, the
-frame goes into the buffer and arrives in the roll as a ring, like any other.
+**The shutter shows the exposure as it is taken.** Its ring goes grey while the
+hourglass is lit — a track, with nothing on it yet. Press, and the disc inside
+goes grey too, with the seconds left in it, and the ring fills white, clockwise
+from the top, as the time on the dial passes. It is the one control the eye is
+on at the moment of taking a photograph, and the one that can't be pressed again
+until the exposure is in, so it is where both of those things are said: a grey
+disc already looks like a button that isn't there to be pressed. The ring is
+drawn from when the exposure opened and how long it lasts, frame by frame, so it
+fills smoothly rather than a second at a time.
+
+### The shutter comes back when the last frame is in
+
+**Not when the photograph is made.** The shutter is busy for the time on the
+dial, since that is the sensor exposing and nothing else could use it — and
+then it comes back, the way it does after any frame. The frame's ring is in the
+roll at that moment, and the last frames are added up, the sum merged and the
+negative written behind the shooting, to be developed like any other (see [The
+shutter waits for the sensor, not the darkroom](#the-shutter-waits-for-the-sensor-not-the-darkroom)).
+It used to wait for all of that: the shutter stayed dim at the end of the count
+while the last frames were read and the file was written, with nothing to say
+why, which from the outside is indistinguishable from the app hanging.
+
+Adding frames up is the CPU's work rather than the GPU's, so unlike developing
+it can carry on if the app goes to the background straight after. The exposure
+goes back to the pins or the camera at the same moment the shutter does.
 
 ### Why it is many frames
 
@@ -362,7 +386,11 @@ all — is kept as an ordinary photograph, and the reason is said. A frame later
 in the run that can't be read ends the run there, with what has been added so
 far.
 
-Reading a frame takes a few hundredths of a second in a release build. A debug
+Reading a frame takes a few hundredths of a second in a release build, on half
+the phone's cores and at a lower priority than the screen — so the viewfinder
+and a finger on it keep cores of their own. It used to take every core it could
+get, which in a debug build was the whole phone for the better part of a second
+a frame, and the interface stuttered for the length of the exposure. A debug
 build — which is what Xcode runs on a phone by default — checks every
 subscript and folds nothing in, and takes about ten times as long. That stays
 behind the shooting for as long as it is shorter than a frame; past that, the
@@ -416,11 +444,22 @@ they are made while you wait.
 ## Double exposure
 
 **The two squares after the hourglass** make the shutter's next two frames one
-photograph. Press the shutter and the first is taken and held; the squares fill
-in, the row under the frame reads **SECOND EXPOSURE** where it read **FIRST
-EXPOSURE**, and the first frame stays on the viewfinder as a ghost while the
-second is composed over it. Press again and the two become one negative, which
-goes into the buffer and arrives in the roll like any other frame.
+photograph. **The shutter's ring splits into two halves**, both grey. Press, and
+the first frame is taken and held: the left half goes white, the squares fill
+in, and the first frame stays on the viewfinder as a ghost while the second is
+composed over it. Press again and the right half goes white — both are lit for a
+moment, so the pair is seen to be complete — and then the ring is grey again,
+ready for the next pair.
+
+**The second press is an ordinary press.** The shutter is back as soon as the
+second frame is off the sensor, the ghost goes, and the frame's ring is in the
+roll. The two negatives go into the buffer together, as one frame with two
+negatives on disk, and the buffer adds them as the first step of developing
+them — in memory, every time a development starts, so a development cut short
+begins again from the same two files rather than from a half-finished sum. It
+used to add them in front of the shutter, which held the shutter, and the
+ghost, for as long as two negatives took to read and write: long enough, in a
+debug build, to look like the app had stopped.
 
 ### Added, the way film adds them
 
@@ -517,13 +556,22 @@ dot — the ultra wide's included — ends it, since a lens chosen by hand is
 wanted as it comes. Phones whose ultra wide is fixed focus don't draw it. The dots and the flower
 are centred under the shutter as one row.
 
-**An hourglass sits after the flower**, in one more cell, wherever the sensor
-can give Bayer RAW. It is long exposure, and it is described under [Long
-exposure](#long-exposure): lit in the accent while it is on, and while it is on
-the wheel beside the frame is a timer. **Two squares, one over the other, sit
-after the hourglass**: double exposure, described under [Double
-exposure](#double-exposure). The two are one or the other — lighting one puts
-the other out.
+### The row above the shutter
+
+**Above the shutter is one row of switches in two groups**, each lined up with
+the round button below it. At the left, the sub-profiles — the house, the moon
+and the leaf — with the house's left edge on the black-and-white disc's. They
+change what the photograph looks like. At the right, the shutter's own modes —
+an hourglass for [long exposure](#long-exposure) and two squares for [double
+exposure](#double-exposure) — with the hourglass's left edge on PS's right edge.
+They change how it is taken, and are there wherever the sensor gives Bayer RAW.
+Each glyph sits at the front of its target, so that the edge being lined up is
+the glyph's and not the empty space around it.
+
+The shutter's modes were in the lens row for a while, after the flower, which
+put them among controls about glass. Long exposure and double exposure are one
+or the other, lighting one puts the other out, and neither changes while a
+frame is on the sensor.
 
 The one thing Apple's version does that this doesn't is crop: the Camera app
 trims the ultra wide down to the wide's field of view, so going macro doesn't
@@ -1051,9 +1099,10 @@ taken. Under a warm lamp it comes out yellow, because a profile that assumes
 curve built to open shadows opens the sensor noise living in them.
 
 Both are corrections rather than changes of mind about the look, so they don't
-touch it. **Three small buttons above the shutter** — a house, a moon and a
-leaf — lay a named handful of settings over the top of the base profile, lit in
-the one colour this interface has for something switched on:
+touch it. **Three small buttons at the left of the row above the shutter** — a
+house, a moon and a leaf — lay a named handful of settings over the top of the
+base profile, lit in the one colour this interface has for something switched
+on:
 
 | | Sets |
 | --- | --- |

@@ -147,22 +147,43 @@ enum LongExposure {
     }
 }
 
-/// The countdown while a long exposure is open.
+/// The countdown while a long exposure is open, and how far round the
+/// shutter's ring should be.
 ///
 /// Its own small observable for the reason `ExposureMeter` is one: it changes
 /// every second for half a minute, and published on `CameraModel` that would be
-/// the whole camera screen redrawn every second rather than one readout.
+/// the whole camera screen redrawn every second rather than the shutter and
+/// one readout. The ring itself is drawn from `window` by a timeline, frame by
+/// frame, rather than from anything published here.
 final class LongExposureClock: ObservableObject {
+
+    /// When the exposure opened, and how long it is meant to last.
+    struct Window: Equatable {
+        let start: Date
+        let length: TimeInterval
+    }
 
     /// Whole seconds left, or nil while nothing is being taken.
     @Published private(set) var remaining: Int?
+    /// Nil until the first frame opens.
+    @Published private(set) var window: Window?
 
     private var timer: Timer?
+
+    /// The press: the count is up, the ring hasn't started. Main thread.
+    func arm(seconds: Int) {
+        timer?.invalidate()
+        timer = nil
+        window = nil
+        remaining = seconds
+    }
 
     /// From the moment the first frame opens. Main thread.
     func start(seconds: Int) {
         timer?.invalidate()
-        let end = Date().addingTimeInterval(TimeInterval(seconds))
+        let opened = Window(start: Date(), length: TimeInterval(seconds))
+        let end = opened.start.addingTimeInterval(opened.length)
+        window = opened
         remaining = seconds
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -174,7 +195,14 @@ final class LongExposureClock: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        window = nil
         remaining = nil
+    }
+
+    /// How much of the exposure has passed at `date`, from nothing to all of it.
+    func progress(at date: Date) -> Double {
+        guard let window, window.length > 0 else { return 0 }
+        return min(max(date.timeIntervalSince(window.start) / window.length, 0), 1)
     }
 }
 
@@ -228,6 +256,7 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
     private let seconds: TimeInterval
     private let request: (LongExposureRun) -> Void
     private let opened: () -> Void
+    private let captured: () -> Void
     private let completion: (Result<Outcome, Error>) -> Void
 
     /// Everything below is touched only here, except the stack. The photo
@@ -235,8 +264,10 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
     /// onto this one.
     private let queue = DispatchQueue(label: "com.snap.long-exposure", qos: .userInitiated)
     /// The stack is added to, and merged, only here — in order, so the merge
-    /// is queued behind every frame that was.
-    private let addQueue = DispatchQueue(label: "com.snap.long-exposure.add", qos: .userInitiated)
+    /// is queued behind every frame that was. At utility rather than
+    /// user-initiated: this is work behind the shooting, and the viewfinder and
+    /// the screen come first.
+    private let addQueue = DispatchQueue(label: "com.snap.long-exposure.add", qos: .utility)
 
     private var frameSeconds: TimeInterval = 1
     /// The light the sum should come to, seconds times ISO, or nil for the sum
@@ -267,14 +298,20 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
     ///   - request: asks the photo output for one frame, with this run as its
     ///     delegate. Called once per frame.
     ///   - opened: the first frame has started, which is when the countdown does.
+    ///   - captured: the last frame has been taken, and nothing more is wanted
+    ///     of the camera — which is when the shutter can come back, though the
+    ///     frames are still being added up. Called once, on the run's queue,
+    ///     before `completion`.
     ///   - completion: called once, on a queue of the run's own.
     init(seconds: TimeInterval,
          request: @escaping (LongExposureRun) -> Void,
          opened: @escaping () -> Void,
+         captured: @escaping () -> Void,
          completion: @escaping (Result<Outcome, Error>) -> Void) {
         self.seconds = seconds
         self.request = request
         self.opened = opened
+        self.captured = captured
         self.completion = completion
     }
 
@@ -459,12 +496,14 @@ final class LongExposureRun: NSObject, AVCapturePhotoCaptureDelegate {
         }
     }
 
-    /// Stops asking for frames, and merges once the last one has been added.
+    /// Stops asking for frames, hands the camera back, and merges once the
+    /// last frame has been added.
     private func finish() {
         guard !isFinished else { return }
         isFinished = true
         isWaitingForRoom = false
         watchdog?.cancel()
+        captured()
 
         guard let template else {
             let failure = error ?? Failure.nothingArrived

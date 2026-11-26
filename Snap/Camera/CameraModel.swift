@@ -119,7 +119,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// What macro goes back to when it is switched off.
     private var lensBeforeMacro: Lens?
 
-    /// The hourglass after the macro flower: the shutter takes one long
+    /// The hourglass in the row above the shutter: the shutter takes one long
     /// exposure, made of as many frames as fit in the time on the dial. See
     /// `LongExposure`.
     @Published private(set) var isLongExposureOn = false
@@ -145,6 +145,11 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// The first of the two has been taken and is waiting for the second.
     @Published private(set) var isHoldingExposure = false
+
+    /// How many of the pair have been taken, which is what the shutter's two
+    /// half-rings show: the left lights with the first, the right with the
+    /// second, and both go back out a moment after the pair is in.
+    @Published private(set) var doubleExposuresTaken = 0
 
     /// Added as sensor data too, so Bayer RAW again.
     var isDoubleExposureAvailable: Bool { isRAWAvailable }
@@ -992,6 +997,7 @@ final class CameraModel: NSObject, ObservableObject {
 
     private func releaseHeldExposure() {
         clearGhost()
+        doubleExposuresTaken = 0
         guard let held = heldExposure else { return }
         heldExposure = nil
         isHoldingExposure = false
@@ -1066,39 +1072,38 @@ final class CameraModel: NSObject, ObservableObject {
         }
     }
 
-    /// The second exposure is in: the two added, and the result into the
-    /// buffer like any other frame. Should they refuse to add, both are kept as
-    /// they are rather than either lost. Called on the photo output's queue.
+    /// The second exposure is in. Both negatives go into the buffer as one
+    /// frame, to be added together when its turn comes, and the shutter is
+    /// free again at once — the way it is after any frame. Called on the photo
+    /// output's queue.
     private func completeDoubleExposure(_ held: HeldExposure,
                                         second: Data,
-                                        metadata: [String: Any],
-                                        profile: PositiveFilmProfile,
-                                        takenAt: Date) {
-        doubleQueue.async { [weak self] in
-            guard let self else { return }
-            do {
-                let merged = try DoubleExposure.merge(held.dng, second)
-                try self.buffer.admit(data: merged,
-                                      isRAW: true,
-                                      metadata: held.metadata,
-                                      profile: profile,
-                                      takenAt: held.takenAt)
-            } catch {
-                try? self.buffer.admit(data: held.dng, isRAW: true, metadata: held.metadata,
-                                       profile: held.profile, takenAt: held.takenAt)
-                try? self.buffer.admit(data: second, isRAW: true, metadata: metadata,
-                                       profile: profile, takenAt: takenAt)
-                self.reportError("The two exposures couldn't be added together, so both were kept as they are. \(error.localizedDescription)")
-            }
+                                        profile: PositiveFilmProfile) {
+        do {
+            try buffer.admit(data: held.dng,
+                             isRAW: true,
+                             metadata: held.metadata,
+                             profile: profile,
+                             takenAt: held.takenAt,
+                             second: second)
+        } catch {
+            reportError(error.localizedDescription)
+        }
 
-            // After the buffer's own hop that adds the frame's square, so the
-            // count the shutter checks has gone up before it can be pressed
-            // again.
-            DispatchQueue.main.async {
-                self.heldExposure = nil
-                self.isHoldingExposure = false
-                self.clearGhost()
-                self.isExposing = false
+        // After the buffer's own hop that adds the frame's ring, so the count
+        // the shutter checks has gone up before it can be pressed again.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.heldExposure = nil
+            self.isHoldingExposure = false
+            self.clearGhost()
+            self.isExposing = false
+            // Both halves lit for a moment, so the pair is seen to be complete,
+            // and then the ring is ready for the next one.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                if self.doubleExposuresTaken == 2, self.heldExposure == nil {
+                    self.doubleExposuresTaken = 0
+                }
             }
         }
     }
@@ -1210,8 +1215,10 @@ final class CameraModel: NSObject, ObservableObject {
         if isBuffered, isDoubleExposureOn, isDoubleExposureAvailable {
             if let held = heldExposure {
                 doubleStage = .second(held)
+                doubleExposuresTaken = 2
             } else {
                 doubleStage = .first(stopsUnder: exposureMode == .manual ? 0 : DoubleExposure.stopsUnder)
+                doubleExposuresTaken = 1
                 renderGhost()
             }
         }
@@ -1270,14 +1277,18 @@ final class CameraModel: NSObject, ObservableObject {
 
     /// One long exposure, in as many frames as fit in the time on the dial.
     ///
-    /// The shutter is busy from the press until the merged negative is in the
-    /// buffer, and then it is a frame like any other: developed behind the
-    /// shooting, filed in the roll at the moment of the press. The device is
-    /// held at the plan's exposure for the length of the run and handed back to
-    /// the pins, or to the camera, once it ends.
+    /// The shutter is busy from the press until the last frame is off the
+    /// sensor — which is the exposure itself, and not something anything else
+    /// could use the sensor for — and its ring fills as the time passes. Then
+    /// it comes back, the way it does after any frame: the place in the roll is
+    /// taken at once, and the frames are added up and the negative written
+    /// behind the shooting, to be developed like any other. The device is held
+    /// at the plan's exposure for the length of the run and handed back to the
+    /// pins, or to the camera, the moment the last frame is in.
     private func captureLongExposure() {
         guard !isShutterBusy, isLongExposureAvailable else { return }
         isExposing = true
+        longExposureClock.arm(seconds: longExposureSeconds)
 
         let profile = look.profile
         let takenAt = Date()
@@ -1289,6 +1300,10 @@ final class CameraModel: NSObject, ObservableObject {
 
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         flashShutter()
+
+        // The place the run's negative will fill, kept from when its last
+        // frame is taken until the negative is written.
+        let place = ReservedPlace()
 
         let run = LongExposureRun(
             seconds: TimeInterval(seconds),
@@ -1305,8 +1320,13 @@ final class CameraModel: NSObject, ObservableObject {
             opened: { [weak self] in
                 DispatchQueue.main.async { self?.longExposureClock.start(seconds: seconds) }
             },
+            captured: { [weak self] in
+                guard let self else { return }
+                place.set(self.buffer.reserve(takenAt: takenAt))
+                DispatchQueue.main.async { self.longExposureTaken() }
+            },
             completion: { [weak self] result in
-                self?.finishLongExposure(result, profile: profile, takenAt: takenAt)
+                self?.finishLongExposure(result, in: place.id, profile: profile, takenAt: takenAt)
             })
         longExposureRun = run
 
@@ -1358,37 +1378,43 @@ final class CameraModel: NSObject, ObservableObject {
         return settings
     }
 
-    /// The run is over. Called on the run's own queue, which is as good a
-    /// place as the photo output's for writing the negative to the buffer.
+    /// The last frame is in: the camera is free, though the frames are still
+    /// being added up.
+    ///
+    /// After the buffer's own hop that adds the frame's ring to the roll, so
+    /// the count the shutter checks has gone up before it can be pressed again.
+    private func longExposureTaken() {
+        longExposureRun = nil
+        longExposureClock.stop()
+        applyExposure()
+        restoreFrameDurations()
+        isExposing = false
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// The frames are added up and the negative written: into the place in
+    /// the roll it has had since the last frame was taken. Called on the run's
+    /// own queue.
     private func finishLongExposure(_ result: Result<LongExposureRun.Outcome, Error>,
+                                    in place: UUID?,
                                     profile: PositiveFilmProfile,
                                     takenAt: Date) {
+        guard let place else { return }
         switch result {
         case .success(let outcome):
             do {
-                try buffer.admit(data: outcome.dng,
-                                 isRAW: true,
-                                 metadata: placed(outcome.metadata),
-                                 profile: profile,
-                                 takenAt: takenAt)
+                try buffer.fill(place,
+                                data: outcome.dng,
+                                metadata: placed(outcome.metadata),
+                                profile: profile,
+                                takenAt: takenAt)
             } catch {
                 reportError(error.localizedDescription)
             }
             if let note = outcome.note { reportError(note) }
         case .failure(let error):
+            buffer.release(place)
             reportError(error.localizedDescription)
-        }
-
-        // After the buffer's own hop that adds the frame's square, so the
-        // count the shutter checks has gone up before it can be pressed again.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.longExposureRun = nil
-            self.longExposureClock.stop()
-            self.applyExposure()
-            self.restoreFrameDurations()
-            self.isExposing = false
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
 
@@ -1888,10 +1914,20 @@ final class CameraModel: NSObject, ObservableObject {
     }
 
     /// A first exposure that never arrived takes its ghost with it; a second
-    /// that never arrived leaves the first held, to be tried again.
+    /// that never arrived leaves the first held, to be tried again. Either way
+    /// the ring's halves go back to what is actually held.
     private func dropGhostIfFirst(_ stage: DoubleStage?) {
-        guard case .first? = stage else { return }
-        DispatchQueue.main.async { [weak self] in self?.clearGhost() }
+        switch stage {
+        case .first?:
+            DispatchQueue.main.async { [weak self] in
+                self?.clearGhost()
+                self?.doubleExposuresTaken = 0
+            }
+        case .second?:
+            DispatchQueue.main.async { [weak self] in self?.doubleExposuresTaken = 1 }
+        case nil:
+            break
+        }
     }
 
     /// A frame that never arrived. Nothing reached the buffer, so a buffered
@@ -1977,6 +2013,26 @@ final class CameraModel: NSObject, ObservableObject {
                              xmp: xmp,
                              origin: origin,
                              profile: profile)
+    }
+}
+
+/// A place in the roll a long exposure has reserved, passed from the moment
+/// its last frame is taken to the moment its negative is written — two
+/// callbacks on two queues, so it is guarded.
+private final class ReservedPlace {
+    private let lock = NSLock()
+    private var value: UUID?
+
+    var id: UUID? {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func set(_ id: UUID) {
+        lock.lock()
+        value = id
+        lock.unlock()
     }
 }
 
@@ -2110,8 +2166,7 @@ extension CameraModel: AVCapturePhotoCaptureDelegate {
                                           takenAt: takenAt, stopsUnder: stopsUnder))
                 return
             case .second(let held)? where isRAW:
-                completeDoubleExposure(held, second: data, metadata: metadata,
-                                       profile: profile, takenAt: takenAt)
+                completeDoubleExposure(held, second: data, profile: profile)
                 return
             default:
                 break
