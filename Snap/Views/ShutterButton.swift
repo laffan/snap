@@ -9,8 +9,9 @@ import SwiftUI
 /// dims while a capture is in flight; nothing else moves.
 ///
 /// The ring is also where the shutter says what it is in the middle of. For a
-/// long exposure it is a grey track that fills white, clockwise from the top,
-/// as the time on the dial passes, with the seconds left in a disc gone grey —
+/// long exposure it is cut into one grey segment for every second on the dial,
+/// and each fills white, clockwise from the top, as its second passes, with the
+/// seconds left in a disc gone grey —
 /// the shutter can't be pressed again until the exposure is in, and the disc
 /// says so by looking it. For a double exposure it is two halves, grey until
 /// their exposure is taken: the left with the first, the right with the
@@ -22,8 +23,9 @@ struct ShutterButton: View {
     enum Ring: Equatable {
         /// An ordinary shutter: one white ring.
         case plain
-        /// A long exposure, this far through: nothing to all of it.
-        case progress(Double)
+        /// A long exposure of this many seconds, this far through: nothing to
+        /// all of it.
+        case progress(Double, seconds: Int)
         /// A double exposure, with which of the two are taken.
         case halves(first: Bool, second: Bool)
     }
@@ -108,17 +110,18 @@ struct ShutterButton: View {
             Circle()
                 .strokeBorder(Color.white, lineWidth: ringWidth)
 
-        case .progress(let fraction):
+        case .progress(let fraction, let seconds):
+            // The same break between seconds as between the two halves of a
+            // double exposure, as long as a second is long enough to have one
+            // that size; thirty of them on this ring are not, and get a third
+            // of a second's length instead.
+            let count = max(seconds, 1)
+            let gap = min(Self.halfGap * 2, 0.3 / Double(count))
             ZStack {
-                Circle()
-                    .strokeBorder(Self.unlit, lineWidth: ringWidth)
-                // A circle's path starts at three o'clock and runs clockwise,
-                // so a quarter turn back starts it at the top.
-                Circle()
-                    .inset(by: ringWidth / 2)
-                    .trim(from: 0, to: min(max(fraction, 0), 1))
+                SegmentedRing(count: count, gap: gap, drawn: 1, inset: ringWidth / 2)
+                    .stroke(Self.unlit, style: StrokeStyle(lineWidth: ringWidth, lineCap: .butt))
+                SegmentedRing(count: count, gap: gap, drawn: min(max(fraction, 0), 1), inset: ringWidth / 2)
                     .stroke(Color.white, style: StrokeStyle(lineWidth: ringWidth, lineCap: .butt))
-                    .rotationEffect(.degrees(-90))
             }
 
         case .halves(let first, let second):
@@ -150,6 +153,46 @@ struct ShutterButton: View {
             if second { return "Both exposures taken" }
             return first ? "First exposure taken" : "Double exposure"
         }
+    }
+}
+
+/// Equal arcs round a circle, one per segment, from the top and clockwise, with
+/// `gap` — a share of the way round — between each, drawn as far as `drawn`
+/// says: 1 is every segment whole, and anything less fills them in order, each
+/// one from its start, the one in progress only partly.
+///
+/// One shape for all of them, so thirty seconds is as cheap to draw sixty
+/// times a second as two.
+private struct SegmentedRing: Shape {
+
+    var count: Int
+    var gap: Double
+    var drawn: Double
+    /// Half the stroke, so the line lies inside the frame the way a stroked
+    /// border does.
+    var inset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(rect.width, rect.height) / 2 - inset
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let share = 1 / Double(count)
+        let space = count > 1 ? gap : 0
+
+        var path = Path()
+        for segment in 0..<count {
+            let filled = min(max(drawn * Double(count) - Double(segment), 0), 1)
+            guard filled > 0 else { break }
+            // Angles from three o'clock, increasing clockwise on a screen whose
+            // y runs downward — so a quarter turn back is the top.
+            let start = (Double(segment) * share + space / 2) * 360 - 90
+            let sweep = (share - space) * filled * 360
+            let radians = start * .pi / 180
+            path.move(to: CGPoint(x: center.x + radius * CGFloat(cos(radians)),
+                                  y: center.y + radius * CGFloat(sin(radians))))
+            path.addRelativeArc(center: center, radius: radius,
+                                startAngle: .degrees(start), delta: .degrees(sweep))
+        }
+        return path
     }
 }
 
@@ -192,7 +235,7 @@ struct CloseButton: View {
         Color.black.ignoresSafeArea()
         HStack(spacing: 24) {
             ShutterButton(isBusy: false) {}
-            ShutterButton(isBusy: true, ring: .progress(0.35), count: "7") {}
+            ShutterButton(isBusy: true, ring: .progress(0.35, seconds: 10), count: "7") {}
             ShutterButton(isBusy: false, ring: .halves(first: true, second: false)) {}
             CloseButton {}
         }

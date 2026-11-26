@@ -1005,34 +1005,34 @@ struct CameraView: View {
     /// buttons beside the shutter are: each is 38 across, centred 68 out.
     private static let sideButtonEdge: CGFloat = 68 + 19
 
+    /// The space between any two glyphs in the row above the shutter, in
+    /// either group. Each glyph's target reaches half of it to either side, so
+    /// the targets meet without the glyphs being any further apart.
+    static let modeGlyphGap: CGFloat = 14
+
     /// The row above the shutter: the photograph's modes at the left and the
     /// shutter's at the right.
     ///
     /// Each group is lined up with the round button below it — the house's
-    /// left edge on the black-and-white disc's, the hourglass's left edge on
-    /// PS's right — so the two rows read as one arrangement rather than as a
-    /// row of switches floating over another of buttons. The sub-profiles
-    /// change what the photograph looks like; the shutter's modes change how
-    /// it is taken. They used to be in the lens row, which is about glass.
+    /// left edge on the black-and-white disc's, the double-exposure squares'
+    /// right edge on PS's — so the two rows read as one arrangement rather than
+    /// as a row of switches floating over another of buttons. Laid out as one
+    /// span between those two edges, centred under the shutter, with the groups
+    /// at its two ends: each glyph's target reaches half a gap past it, so the
+    /// span reaches that much further out and it is the glyphs' edges that land
+    /// on the buttons'. The sub-profiles change what the photograph looks
+    /// like; the shutter's modes change how it is taken. They used to be in the
+    /// lens row, which is about glass.
     private var modeRow: some View {
-        ZStack {
-            // The row's own width, so both groups are inside it — an offset
-            // moves where a view is drawn and touched, not the room its
-            // parent makes for it.
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: 26)
-
+        let reach = CameraView.sideButtonEdge + CameraView.modeGlyphGap / 2
+        return HStack(spacing: 0) {
             SubProfileToggles(look: camera.look)
-                .frame(width: SubProfileToggles.width, alignment: .leading)
-                .offset(x: -CameraView.sideButtonEdge + SubProfileToggles.width / 2)
-
+            Spacer(minLength: 0)
             if camera.isLongExposureAvailable {
                 ShutterModeToggles(camera: camera)
-                    .frame(width: ShutterModeToggles.width, alignment: .leading)
-                    .offset(x: CameraView.sideButtonEdge + ShutterModeToggles.width / 2)
             }
         }
+        .frame(width: reach * 2, height: 26)
         .frame(maxWidth: .infinity)
     }
 
@@ -1661,15 +1661,8 @@ private struct SubProfileToggles: View {
 
     @ObservedObject var look: LookModel
 
-    /// Each glyph's target, and the space between them.
-    static let cellWidth: CGFloat = 36
-    static let spacing: CGFloat = 8
-    static var width: CGFloat {
-        CGFloat(SubProfile.allCases.count) * cellWidth + CGFloat(SubProfile.allCases.count - 1) * spacing
-    }
-
     var body: some View {
-        HStack(spacing: SubProfileToggles.spacing) {
+        HStack(spacing: 0) {
             ForEach(SubProfile.allCases) { subProfile in
                 let isOn = look.profile.subProfiles.contains(subProfile)
 
@@ -1680,10 +1673,9 @@ private struct SubProfileToggles: View {
                     Image(systemName: subProfile.symbol)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(isOn ? Color.snapAccent : .white.opacity(0.5))
-                        // Small glyphs, ordinary-sized targets — with the
-                        // glyph at the front of its target, so the first one's
-                        // edge is the row's edge.
-                        .frame(width: SubProfileToggles.cellWidth, height: 26, alignment: .leading)
+                        // Small glyphs, targets that meet half a gap past them.
+                        .padding(.horizontal, CameraView.modeGlyphGap / 2)
+                        .frame(height: 26)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1702,24 +1694,24 @@ private struct SubProfileToggles: View {
 /// exposure with the first kept on its own. Neither can be changed while a
 /// frame is on the sensor.
 ///
-/// The same glyph size and targets as the sub-profiles beside them, glyphs at
-/// the front of their targets the same way, since they share the row.
+/// The same glyph size, gap and targets as the sub-profiles beside them,
+/// since they share the row.
 private struct ShutterModeToggles: View {
 
     @ObservedObject var camera: CameraModel
 
-    static var width: CGFloat { 2 * SubProfileToggles.cellWidth + SubProfileToggles.spacing }
-
     var body: some View {
-        HStack(spacing: SubProfileToggles.spacing) {
-            toggle(symbol: "hourglass",
+        HStack(spacing: 0) {
+            toggle(symbols: ["hourglass"],
+                   showing: 0,
                    label: "Long exposure",
                    value: camera.isLongExposureOn ? "On" : "Off",
                    isOn: camera.isLongExposureOn) {
                 camera.toggleLongExposure()
             }
 
-            toggle(symbol: camera.isHoldingExposure ? "square.filled.on.square" : "square.on.square",
+            toggle(symbols: ["square.on.square", "square.filled.on.square"],
+                   showing: camera.isHoldingExposure ? 1 : 0,
                    label: "Double exposure",
                    value: camera.isHoldingExposure ? "First exposure taken"
                        : camera.isDoubleExposureOn ? "On" : "Off",
@@ -1732,7 +1724,11 @@ private struct ShutterModeToggles: View {
         .animation(.easeOut(duration: 0.12), value: camera.isDoubleExposureOn)
     }
 
-    private func toggle(symbol: String,
+    /// One switch. Every glyph it can show is laid in at once and all but one
+    /// hidden, so the switch is as wide as the widest of them whichever is up:
+    /// the squares filling in mustn't nudge the hourglass beside them.
+    private func toggle(symbols: [String],
+                        showing: Int,
                         label: String,
                         value: String,
                         isOn: Bool,
@@ -1741,11 +1737,17 @@ private struct ShutterModeToggles: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             action()
         } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(isOn ? Color.snapAccent : .white.opacity(0.5))
-                .frame(width: SubProfileToggles.cellWidth, height: 26, alignment: .leading)
-                .contentShape(Rectangle())
+            ZStack(alignment: .trailing) {
+                ForEach(Array(symbols.enumerated()), id: \.offset) { index, symbol in
+                    Image(systemName: symbol)
+                        .opacity(index == showing ? 1 : 0)
+                }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(isOn ? Color.snapAccent : .white.opacity(0.5))
+            .padding(.horizontal, CameraView.modeGlyphGap / 2)
+            .frame(height: 26)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -1779,10 +1781,11 @@ private struct ShutterControl: View {
     }
 }
 
-/// The long exposure's shutter. The ring is drawn from when the exposure
-/// opened and how long it lasts, on a timeline that only runs while it is
-/// open, so it fills smoothly rather than a second at a time; the count in the
-/// disc is the clock's.
+/// The long exposure's shutter: a segment of ring for each second on the dial.
+/// The ring is drawn from when the exposure opened and how long it lasts, on a
+/// timeline that only runs while it is open, so each second's segment fills
+/// smoothly across its second rather than all at once at the end of it; the
+/// count in the disc is the clock's.
 private struct LongExposureShutter: View {
 
     @ObservedObject var camera: CameraModel
@@ -1791,7 +1794,8 @@ private struct LongExposureShutter: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: clock.window == nil)) { context in
             ShutterButton(isBusy: camera.isShutterBusy,
-                          ring: .progress(clock.progress(at: context.date)),
+                          ring: .progress(clock.progress(at: context.date),
+                                          seconds: camera.longExposureSeconds),
                           count: clock.remaining.map { String($0) }) {
                 camera.capture()
             }

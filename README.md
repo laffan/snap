@@ -260,15 +260,19 @@ compensation and becomes how long the shutter stays open: two seconds to
 thirty, a click a second, a number every five. Double-tapping it puts it back
 to ten.
 
-**The shutter shows the exposure as it is taken.** Its ring goes grey while the
-hourglass is lit — a track, with nothing on it yet. Press, and the disc inside
-goes grey too, with the seconds left in it, and the ring fills white, clockwise
-from the top, as the time on the dial passes. It is the one control the eye is
+**The shutter shows the exposure as it is taken.** While the hourglass is lit,
+its ring is cut into one grey segment for every second on the dial, ten for ten
+seconds and thirty for thirty, with the same breaks between them as between the
+halves of a double exposure — or a third of a segment, where thirty of them
+don't leave room for that. Press, and the disc inside goes grey, with the
+seconds left in it, and the segments fill white one at a time, clockwise from
+the top, each across its own second. It is the one control the eye is
 on at the moment of taking a photograph, and the one that can't be pressed again
 until the exposure is in, so it is where both of those things are said: a grey
 disc already looks like a button that isn't there to be pressed. The ring is
-drawn from when the exposure opened and how long it lasts, frame by frame, so it
-fills smoothly rather than a second at a time.
+drawn from when the exposure opened and how long it lasts, frame by frame, so
+each segment fills smoothly rather than appearing whole at the end of its
+second.
 
 ### The shutter comes back when the last frame is in
 
@@ -563,10 +567,17 @@ the round button below it. At the left, the sub-profiles — the house, the moon
 and the leaf — with the house's left edge on the black-and-white disc's. They
 change what the photograph looks like. At the right, the shutter's own modes —
 an hourglass for [long exposure](#long-exposure) and two squares for [double
-exposure](#double-exposure) — with the hourglass's left edge on PS's right edge.
-They change how it is taken, and are there wherever the sensor gives Bayer RAW.
-Each glyph sits at the front of its target, so that the edge being lined up is
-the glyph's and not the empty space around it.
+exposure](#double-exposure) — with the squares' right edge on PS's. They change
+how it is taken, and are there wherever the sensor gives Bayer RAW.
+
+The glyphs are fourteen points apart in both groups, and each one's target
+reaches seven points to either side of it, so the targets meet without the
+glyphs being spread out to make room for them. The row is laid out as one span
+between the two buttons' outer edges, pushed out by those seven points, so it
+is the glyphs and not the targets around them that line up with the buttons.
+The squares fill in while a first exposure waits; both versions of the glyph
+are laid in at once, one hidden, so the switch keeps its width and the
+hourglass beside it doesn't move.
 
 The shutter's modes were in the lens row for a while, after the flower, which
 put them among controls about glass. Long exposure and double exposure are one
