@@ -851,10 +851,11 @@ the bar's centre, around buttons that were already there and don't move. Nothing
 else arrives: what the panel can do lives in the panel, at the foot of the
 sliders it belongs to, and the capture is a button of its own under the frame.
 
-**It goes red, and grows a red border, the moment the look stops being the one
-the app ships with** — and stays grey while it is, since there is then nothing
-to undo. Everything counts: a slider, a sub-profile, black and white, a setting
-taken back off the house or the moon by hand. Red because this is the one button
+**Reset goes back to how the frame under the sliders was captured**, or, over
+the live camera, to the look the app ships with. **It goes red, and grows a red
+border, the moment the look stops being that** — and stays grey while it is,
+since there is then nothing to undo. Everything counts: a slider, a sub-profile,
+black and white, a setting taken back off the house or the moon by hand. Red because this is the one button
 in the app that throws work away, and the ring is what makes it read as a button
 worth being careful with rather than as a word that has gone a different colour.
 It is also the shortest answer to *am I looking at the built-in look or at
@@ -1436,14 +1437,28 @@ line of thumbnails that lied about what tapping one would produce. Now the
 sliders say what the frame is, and the panel opens on the photograph rather than
 on a version of it.
 
+**Unless the sliders have been moved.** Going from one negative to the next
+with anything changed from how the first was captured takes those settings
+along, so a look worked out on one frame can be walked across the roll. A
+monochrome frame still comes out in black and white, and the frame after it
+gets back whatever black and white was before. **Reset** puts the frame under
+the sliders back as it was captured, and from there each frame arrives as itself
+again. Holding **Before** always shows the frame as it was captured.
+
 **And they stay when the panel closes.** Whatever was last developed is where
 the develop screen was left, and the camera picks up from there — one look, one
 set of sliders, wherever you are standing on it. Nothing is quietly put back on
 the way out. The one thing that ever was, black and white after a monochrome
 negative, is not any more: a look that restored one setting out of forty would
-be harder to predict than one that restores none. **Reset** on the bar is the
-way back to the built-in look, and it is red whenever there is anything to go
-back from.
+be harder to predict than one that restores none.
+
+So once the panel is closed, a **small red camera** appears between Develop and
+the heart whenever the camera is wearing something other than the app's own
+look — which a frame captured in unusual settings can leave behind as easily as
+an afternoon at the sliders. Tapping it puts the built-in look back. Black and
+white and the sub-profiles stay as they are, since each has its own switch beside
+the shutter; the camera's test is Develop's, so the two go red together, and
+both go back to normal with the one tap.
 
 **Snap** becomes **Capture Version** while a negative is loaded, and runs the same
 pipeline the shutter does — develop, crop, grade, encode, square the DNG,
@@ -1502,7 +1517,9 @@ can be nudged without the thumb covering it; drag below the slider as you go and
 it moves finer, down to a quarter speed. A vertical drag scrolls the panel
 instead. Double-tap any slider to return it to neutral. Where the look's own
 value isn't neutral, a small mark on the track shows where it sits, and every
-section heading has a reset that puts that section back on the look.
+section heading has a reset that puts just that section back the way Reset
+would: as the frame was captured, or on the built-in look over the live camera.
+The dots on the tools count from the same place.
 
 Hold **Before**, beside the histogram, to see the frame as it was when it came
 under the sliders; let go to come back. It only changes the screen: a capture

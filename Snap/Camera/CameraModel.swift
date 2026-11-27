@@ -202,6 +202,16 @@ final class CameraModel: NSObject, ObservableObject {
     /// taken. The colour is still in the DNG for anyone who exports it.
     var isMonochromeLocked: Bool { versionSource?.profile.blackAndWhite == true }
 
+    /// The settings the negative under the sliders arrived with — what it was
+    /// captured in — and so what Reset in the develop panel goes back to.
+    /// Nil over the live camera, which wasn't captured in anything.
+    @Published private(set) var capturedProfile: PositiveFilmProfile? = nil
+
+    /// Black and white as it stood before a monochrome frame forced it on, so
+    /// edits carried on to the next frame don't take that frame's lock with
+    /// them. Nil unless the frame under the sliders is one of those.
+    private var monochromeBeforeLock: Bool? = nil
+
     /// The source developed once at preview size. Re-grading it is cheap;
     /// re-developing it is not, so it is only redone when a setting that feeds
     /// the RAW pipeline itself changes.
@@ -1536,19 +1546,48 @@ final class CameraModel: NSObject, ObservableObject {
     /// the shot's own look comes with it, off the file the way everything else
     /// about it is read, and the sliders say what the frame is.
     ///
+    /// Except once something has been changed. Moving from one negative to
+    /// the next with the sliders moved off what the first was captured in
+    /// takes those settings along, so a look worked out on one frame can be
+    /// walked across the roll; Reset puts a frame back as it was captured, and
+    /// from there each frame arrives as itself again. Either way, Before
+    /// shows the frame as it was captured.
+    ///
     /// Its settings then stay on the sliders when the panel closes. Whatever
     /// was last developed is where the develop screen was left, and the camera
-    /// picks up from there rather than from something it put back quietly.
+    /// picks up from there rather than from something it put back quietly —
+    /// with the red camera on the bar to put the app's own look back.
     func beginVersioning(from shot: Shot) {
         guard let rawURL = store.rawURL(for: shot) else { return }
-        versionSource = shot
 
-        var profile = store.profile(for: shot)
+        // Read before anything moves: whether the frame being left had been
+        // changed from how it arrived.
+        let carries = versionSource != nil
+            && capturedProfile.map { look.profile != $0 } == true
+
+        let isLocked = shot.profile.blackAndWhite
+        var captured = store.profile(for: shot)
         // A monochrome frame stays monochrome whatever its stored look says:
         // the colour it was rendered without isn't in the JPEG, and the panel's
         // toggle is locked for the same reason.
-        if shot.profile.blackAndWhite { profile.blackAndWhite = true }
-        look.apply(profile)
+        if isLocked { captured.blackAndWhite = true }
+
+        var profile = captured
+        if carries {
+            profile = look.profile
+            if let restored = monochromeBeforeLock { profile.blackAndWhite = restored }
+            monochromeBeforeLock = nil
+            if isLocked {
+                monochromeBeforeLock = profile.blackAndWhite
+                profile.blackAndWhite = true
+            }
+        } else {
+            monochromeBeforeLock = nil
+        }
+
+        versionSource = shot
+        capturedProfile = captured
+        look.apply(profile, before: captured)
 
         setVersioning(true)
         developSource(at: rawURL)
@@ -1559,11 +1598,24 @@ final class CameraModel: NSObject, ObservableObject {
     /// developed, which is what the develop screen was left showing.
     func endVersioning() {
         versionSource = nil
+        capturedProfile = nil
+        monochromeBeforeLock = nil
         developedSource = nil
         developedBoost = nil
         isPeekingSource = false
         setVersioning(false)
         renderer.clear()
+    }
+
+    /// The develop panel's Reset: a negative under the sliders goes back to
+    /// what it was captured in, and the live camera back to the built-in look.
+    func resetLook() {
+        if versionSource != nil, let capturedProfile {
+            monochromeBeforeLock = nil
+            look.apply(capturedProfile, before: capturedProfile)
+        } else {
+            look.reset()
+        }
     }
 
     /// The same peek the saved-frame viewer offers, for a negative under the

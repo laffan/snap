@@ -47,13 +47,23 @@ struct ActionBar: View {
     /// Holding the four squares rather than tapping them: the whole roll as a
     /// wall, in place of the line of it under the bar.
     var onBrowseRoll: () -> Void
+    /// What Reset goes back to: the frame under the sliders as it was
+    /// captured, or the built-in look over the live camera.
+    var resetTarget: PositiveFilmProfile
     var onReset: () -> Void
+    /// The red camera: the app's own look back on the camera.
+    var onRevertToBase: () -> Void
 
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
                 // What the app is: a develop screen and the frames you kept.
                 develop
+                // Only off the develop screen: there, the panel's own Reset
+                // is the way back, and this would be a second one.
+                if !isDeveloping {
+                    RevertButton(look: look, action: onRevertToBase)
+                }
                 FavoritesButton(store: store, action: onFavorites)
 
                 Spacer()
@@ -66,7 +76,7 @@ struct ActionBar: View {
                 snapshotsButton
 
                 if isDeveloping {
-                    ResetButton(look: look, action: onReset)
+                    ResetButton(look: look, target: resetTarget, action: onReset)
                         .padding(.leading, 8)
                         .transition(.opacity)
                 }
@@ -191,13 +201,7 @@ private struct DevelopLabel: View {
     @ObservedObject var look: LookModel
     var isDeveloping: Bool
 
-    private var isChanged: Bool {
-        let profile = look.profile
-        var untouched = PositiveFilmProfile()
-        untouched.blackAndWhite = profile.blackAndWhite
-        untouched.subProfiles = profile.subProfiles
-        return profile.resolved != untouched.resolved
-    }
+    private var isChanged: Bool { look.differsFromBase }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -218,28 +222,66 @@ private struct DevelopLabel: View {
     }
 }
 
+// MARK: - Revert to the app's look
+
+/// A small red camera between Develop and the heart, while the camera is
+/// wearing something other than the app's own look.
+///
+/// Leaving the develop screen leaves its settings on the camera, on purpose —
+/// and a frame that arrived under the sliders may have been captured in
+/// settings nobody would want to shoot the next one in. So once the panel is
+/// closed, this is the one tap back to the look the app ships with. Black and
+/// white and the sub-profiles stay as they are: each has its own switch beside
+/// the shutter that already says so.
+///
+/// Watches the look itself, for the same reason Reset does.
+private struct RevertButton: View {
+
+    @ObservedObject var look: LookModel
+    var action: () -> Void
+
+    var body: some View {
+        if look.differsFromBase {
+            Button(action: action) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.snapReset)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .transition(.opacity)
+            .accessibilityLabel("Use the app's look")
+            .accessibilityHint("Puts the camera back on the built-in settings")
+        }
+    }
+}
+
 // MARK: - Reset
 
-/// The way back to the look the app ships with.
+/// The way back to how the frame under the sliders was captured, or, over the
+/// live camera, to the look the app ships with.
 ///
 /// Grey while that is what is on the sliders and there is nothing to undo, red
 /// and ringed in red the moment anything has moved — which is also the shortest
-/// way to answer *am I looking at the built-in look or at something I made*
-/// without opening the panel and reading forty rows. The ring is what makes it
-/// read as a button worth being careful with rather than as a word that has
-/// gone a different colour.
+/// way to answer *am I looking at what this frame was taken in or at something
+/// I made* without opening the panel and reading forty rows. The ring is what
+/// makes it read as a button worth being careful with rather than as a word
+/// that has gone a different colour.
 ///
 /// Watches the look itself, so a slider drag redraws one small button rather
 /// than the bar, the roll and the panel above it.
 private struct ResetButton: View {
 
     @ObservedObject var look: LookModel
+    /// What Reset goes back to.
+    var target: PositiveFilmProfile
     var action: () -> Void
 
     /// Everything counts: a slider, a sub-profile, black and white, a setting
     /// taken back off the house or the moon by hand. Reset puts all of it back,
     /// so all of it is what lights the button.
-    private var isChanged: Bool { look.profile != PositiveFilmProfile() }
+    private var isChanged: Bool { look.profile != target }
 
     var body: some View {
         Button(action: action) {
@@ -257,7 +299,7 @@ private struct ResetButton: View {
         .buttonStyle(.plain)
         .animation(.easeOut(duration: 0.15), value: isChanged)
         .accessibilityLabel("Reset")
-        .accessibilityValue(isChanged ? "the look has been changed" : "the look is the built-in one")
+        .accessibilityValue(isChanged ? "the look has been changed" : "nothing to reset")
     }
 }
 

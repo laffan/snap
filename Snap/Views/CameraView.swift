@@ -187,6 +187,7 @@ struct CameraView: View {
                 if isDeveloping {
                     DevelopPanel(look: camera.look,
                                  renderer: camera.renderer,
+                                 resetTarget: camera.capturedProfile ?? PositiveFilmProfile(),
                                  isRAWAvailable: camera.isRAWAvailable,
                                  negativeStatus: camera.negativeStatus,
                                  isMonochromeLocked: camera.isMonochromeLocked,
@@ -883,7 +884,16 @@ struct CameraView: View {
                   onSnapshots: { isShowingSnapshots = true },
                   onToggleStrip: toggleStrip,
                   onBrowseRoll: { isShowingGrid = true },
-                  onReset: { camera.look.reset() })
+                  resetTarget: camera.capturedProfile ?? PositiveFilmProfile(),
+                  onReset: { camera.resetLook() },
+                  onRevertToBase: revertToBase)
+    }
+
+    /// The red camera on the bar: the app's own look back on the camera,
+    /// after the develop screen was left wearing something else.
+    private func revertToBase() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.easeOut(duration: 0.15)) { camera.look.revertToBase() }
     }
 
     private func toggleStrip() {

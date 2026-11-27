@@ -84,13 +84,13 @@ enum DevelopGroup: CaseIterable {
         }
     }
 
-    /// Puts this group's settings back to the built-in look's.
+    /// Puts this group's settings back to `base`'s — the frame under the
+    /// sliders as it was captured, or the built-in look over the live camera.
     ///
     /// Black and white is in none of them: it is a way of shooting that
     /// outlives the app, and has its own switch beside the shutter. Neither
     /// are the sub-profiles, which are switches too.
-    func reset(_ profile: inout PositiveFilmProfile) {
-        let base = DevelopGroup.base
+    func reset(_ profile: inout PositiveFilmProfile, to base: PositiveFilmProfile) {
         switch self {
         case .light:
             profile.exposure = base.exposure
@@ -149,12 +149,9 @@ enum DevelopGroup: CaseIterable {
         }
     }
 
-    /// Made once: every heading and every tool's dot asks this on each redraw.
-    private static let base = PositiveFilmProfile()
-
-    func isChanged(_ profile: PositiveFilmProfile) -> Bool {
+    func isChanged(_ profile: PositiveFilmProfile, from base: PositiveFilmProfile) -> Bool {
         var reset = profile
-        self.reset(&reset)
+        self.reset(&reset, to: base)
         return reset != profile
     }
 }
@@ -166,6 +163,10 @@ struct DevelopPanel: View {
     @ObservedObject var look: LookModel
     /// What the viewer is drawing, for the histogram.
     let renderer: PreviewRenderer
+    /// What a section's reset goes back to, and what its tool's dot measures
+    /// from: the frame under the sliders as it was captured, or the built-in
+    /// look over the live camera.
+    let resetTarget: PositiveFilmProfile
 
     var isRAWAvailable: Bool
     var negativeStatus: CameraModel.NegativeStatus?
@@ -203,6 +204,7 @@ struct DevelopPanel: View {
 
     init(look: LookModel,
          renderer: PreviewRenderer,
+         resetTarget: PositiveFilmProfile,
          isRAWAvailable: Bool,
          negativeStatus: CameraModel.NegativeStatus?,
          isMonochromeLocked: Bool,
@@ -213,6 +215,7 @@ struct DevelopPanel: View {
          onSave: @escaping () -> Void) {
         self.look = look
         self.renderer = renderer
+        self.resetTarget = resetTarget
         self.isRAWAvailable = isRAWAvailable
         self.negativeStatus = negativeStatus
         self.isMonochromeLocked = isMonochromeLocked
@@ -312,7 +315,7 @@ struct DevelopPanel: View {
 
     private func toolButton(_ item: DevelopTool) -> some View {
         let isSelected = item == tool
-        let isChanged = DevelopGroup.allCases.contains { $0.tool == item && $0.isChanged(look.profile) }
+        let isChanged = DevelopGroup.allCases.contains { $0.tool == item && $0.isChanged(look.profile, from: resetTarget) }
 
         return Button {
             guard item != tool else { return }
@@ -375,14 +378,14 @@ struct DevelopPanel: View {
                                         _ group: DevelopGroup,
                                         @ViewBuilder content: () -> Content) -> some View {
         DevelopSection(title: title,
-                       isChanged: group.isChanged(look.profile),
+                       isChanged: group.isChanged(look.profile, from: resetTarget),
                        onReset: { reset(group) },
                        content: content)
     }
 
     private func reset(_ group: DevelopGroup) {
         var profile = look.profile
-        group.reset(&profile)
+        group.reset(&profile, to: resetTarget)
         look.profile = profile
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }

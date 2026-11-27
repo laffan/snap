@@ -103,14 +103,15 @@ final class LookModel: ObservableObject {
     private var beforeProfile: PositiveFilmProfile?
     private var beforeFilter: PositiveFilmFilter?
 
-    /// Takes the look as it stands as the one Before goes back to.
+    /// Takes the look as it stands — or `reference`, when given — as the one
+    /// Before goes back to.
     ///
     /// Called when the panel opens and whenever a different look is put on
     /// the sliders whole — a negative loaded, a saved look applied — since in
     /// each case what came before is what the frame was wearing when it
     /// arrived. Baked off the main thread, like every other filter.
-    func markBefore() {
-        let resolved = profile.resolved
+    func markBefore(_ reference: PositiveFilmProfile? = nil) {
+        let resolved = (reference ?? profile).resolved
         lock.lock()
         let unchanged = beforeProfile == resolved
         beforeProfile = resolved
@@ -191,9 +192,39 @@ final class LookModel: ObservableObject {
         profile = fresh
     }
 
-    func apply(_ profile: PositiveFilmProfile) {
+    /// Puts a whole look on the sliders. `before` is what holding Before
+    /// shows from then on — the look itself unless told otherwise, which a
+    /// frame wearing settings carried over from the last one is.
+    func apply(_ profile: PositiveFilmProfile, before: PositiveFilmProfile? = nil) {
         self.profile = profile
-        markBefore()
+        markBefore(before)
+    }
+
+    // MARK: - The app's own look
+
+    /// The built-in look with this look's camera-screen switches — black and
+    /// white, and the house, the moon and the leaf — thrown the same way.
+    ///
+    /// Those switches are left out of "is this the app's look" because each
+    /// already says whether it is on, beside the shutter, and black and white
+    /// is kept across launches by somebody who shoots that way.
+    var baseProfile: PositiveFilmProfile {
+        var base = PositiveFilmProfile()
+        base.blackAndWhite = profile.blackAndWhite
+        base.subProfiles = profile.subProfiles
+        return base
+    }
+
+    /// Whether what the camera renders differs from the app's own look.
+    /// Compared as rendered, so a slider a sub-profile holds counts once it
+    /// has been moved by hand, and a sub-profile's own settings don't.
+    var differsFromBase: Bool {
+        profile.resolved != baseProfile.resolved
+    }
+
+    /// Back to the app's own look, leaving the camera-screen switches alone.
+    func revertToBase() {
+        profile = baseProfile
     }
 
     /// Moves one of the settings a sub-profile is allowed to hold, and takes it
