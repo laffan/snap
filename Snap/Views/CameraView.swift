@@ -187,7 +187,7 @@ struct CameraView: View {
                 if isDeveloping {
                     DevelopPanel(look: camera.look,
                                  renderer: camera.renderer,
-                                 resetTarget: camera.capturedProfile ?? PositiveFilmProfile(),
+                                 resetTarget: camera.versionCapturedProfile ?? PositiveFilmProfile(),
                                  isRAWAvailable: camera.isRAWAvailable,
                                  negativeStatus: camera.negativeStatus,
                                  isMonochromeLocked: camera.isMonochromeLocked,
@@ -884,7 +884,7 @@ struct CameraView: View {
                   onSnapshots: { isShowingSnapshots = true },
                   onToggleStrip: toggleStrip,
                   onBrowseRoll: { isShowingGrid = true },
-                  resetTarget: camera.capturedProfile ?? PositiveFilmProfile(),
+                  resetTarget: camera.versionCapturedProfile ?? PositiveFilmProfile(),
                   onReset: { camera.resetLook() },
                   onRevertToBase: revertToBase)
     }

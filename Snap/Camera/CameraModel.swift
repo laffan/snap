@@ -205,7 +205,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// The settings the negative under the sliders arrived with — what it was
     /// captured in — and so what Reset in the develop panel goes back to.
     /// Nil over the live camera, which wasn't captured in anything.
-    @Published private(set) var capturedProfile: PositiveFilmProfile? = nil
+    @Published private(set) var versionCapturedProfile: PositiveFilmProfile? = nil
 
     /// Black and white as it stood before a monochrome frame forced it on, so
     /// edits carried on to the next frame don't take that frame's lock with
@@ -1563,7 +1563,7 @@ final class CameraModel: NSObject, ObservableObject {
         // Read before anything moves: whether the frame being left had been
         // changed from how it arrived.
         let carries = versionSource != nil
-            && capturedProfile.map { look.profile != $0 } == true
+            && versionCapturedProfile.map { look.profile != $0 } == true
 
         let isLocked = shot.profile.blackAndWhite
         var captured = store.profile(for: shot)
@@ -1586,7 +1586,7 @@ final class CameraModel: NSObject, ObservableObject {
         }
 
         versionSource = shot
-        capturedProfile = captured
+        versionCapturedProfile = captured
         look.apply(profile, before: captured)
 
         setVersioning(true)
@@ -1598,7 +1598,7 @@ final class CameraModel: NSObject, ObservableObject {
     /// developed, which is what the develop screen was left showing.
     func endVersioning() {
         versionSource = nil
-        capturedProfile = nil
+        versionCapturedProfile = nil
         monochromeBeforeLock = nil
         developedSource = nil
         developedBoost = nil
@@ -1610,9 +1610,9 @@ final class CameraModel: NSObject, ObservableObject {
     /// The develop panel's Reset: a negative under the sliders goes back to
     /// what it was captured in, and the live camera back to the built-in look.
     func resetLook() {
-        if versionSource != nil, let capturedProfile {
+        if versionSource != nil, let captured = versionCapturedProfile {
             monochromeBeforeLock = nil
-            look.apply(capturedProfile, before: capturedProfile)
+            look.apply(captured, before: captured)
         } else {
             look.reset()
         }
