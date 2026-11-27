@@ -83,7 +83,74 @@ final class LookModel: ObservableObject {
     var filter: PositiveFilmFilter {
         lock.lock()
         defer { lock.unlock() }
+        if isShowingBefore, let beforeFilter { return beforeFilter }
         return bakedFilter ?? .standard
+    }
+
+    // MARK: - Before and after
+
+    /// True while the develop panel's Before is held: the viewer shows the
+    /// frame as it was when it came under the sliders, and lets go back to
+    /// the sliders' version the moment it is released.
+    ///
+    /// Only the screen. Captures go through `finalFilter(for:)`, which never
+    /// looks at this, so holding Before can't put the old look in a file.
+    @Published private(set) var showsBefore = false
+
+    /// Read on the capture queue alongside `bakedFilter`, so kept under the
+    /// same lock rather than read off the published copy.
+    private var isShowingBefore = false
+    private var beforeProfile: PositiveFilmProfile?
+    private var beforeFilter: PositiveFilmFilter?
+
+    /// Takes the look as it stands as the one Before goes back to.
+    ///
+    /// Called when the panel opens and whenever a different look is put on
+    /// the sliders whole — a negative loaded, a saved look applied — since in
+    /// each case what came before is what the frame was wearing when it
+    /// arrived. Baked off the main thread, like every other filter.
+    func markBefore() {
+        let resolved = profile.resolved
+        lock.lock()
+        let unchanged = beforeProfile == resolved
+        beforeProfile = resolved
+        if !unchanged { beforeFilter = nil }
+        lock.unlock()
+        guard !unchanged else { return }
+
+        bakeQueue.async { [weak self] in
+            guard let self else { return }
+            let filter = PositiveFilmFilter(profile: resolved, resolution: .final)
+            self.lock.lock()
+            let isCurrent = self.beforeProfile == resolved
+            if isCurrent { self.beforeFilter = filter }
+            let isShowing = self.isShowingBefore
+            self.lock.unlock()
+            if isCurrent && isShowing {
+                DispatchQueue.main.async { self.revision &+= 1 }
+            }
+        }
+    }
+
+    /// Whether the look Before goes back to differs from the one on the
+    /// sliders — which is when holding Before would show anything.
+    var hasBefore: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let beforeProfile else { return false }
+        return beforeProfile != profile.resolved
+    }
+
+    func setShowingBefore(_ showing: Bool) {
+        lock.lock()
+        let changed = isShowingBefore != showing
+        isShowingBefore = showing
+        lock.unlock()
+        guard changed else { return }
+        showsBefore = showing
+        // A still under the sliders redraws off this; the live camera picks
+        // the change up on its next frame either way.
+        revision &+= 1
     }
 
     /// A guaranteed full-resolution filter for `profile`, reusing the baked
@@ -126,6 +193,7 @@ final class LookModel: ObservableObject {
 
     func apply(_ profile: PositiveFilmProfile) {
         self.profile = profile
+        markBefore()
     }
 
     /// Moves one of the settings a sub-profile is allowed to hold, and takes it

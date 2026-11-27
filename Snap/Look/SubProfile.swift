@@ -96,7 +96,7 @@ enum SubProfile: String, Codable, CaseIterable, Identifiable {
             return [.exposure: -0.6, .shadows: -40]
         case .infrared:
             // The whole of it. The mapping lives in the grade — see
-            // `PositiveFilmFilter.infrared` — and this is how much of it.
+            // `Grade.infrared` — and this is how much of it.
             return [.infrared: 100]
         }
     }

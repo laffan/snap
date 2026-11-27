@@ -24,6 +24,15 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// should not carry a correction for a room it wasn't shot in.
     var temperature: Float = 0
 
+    /// Lightroom's relative Tint, −100...100. Negative is greener, positive
+    /// more magenta.
+    ///
+    /// The other axis of a white balance: green against red and blue together,
+    /// for the cast a fluorescent tube or a canopy of leaves puts on a frame
+    /// that Temperature can't reach. Zero by default, for the same reason
+    /// Temperature is.
+    var tint: Float = 0
+
     /// Exposure in stops, −5...5.
     ///
     /// A develop setting rather than a camera one, so it re-applies when a
@@ -47,6 +56,15 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// up the shadow detail that `shadows` just opened.
     var blacks: Float = -5
 
+    /// Lightroom Whites, −100...100. The other end of the curve from Blacks:
+    /// positive pushes the brightest tones toward clipping, negative pulls
+    /// them back under it, and the midtones are left alone either way.
+    var whites: Float = 0
+
+    /// Lightroom Texture, −100...100. Detail at the scale of skin and bark —
+    /// finer than Clarity, coarser than Sharpening. Negative smooths it.
+    var texture: Float = 0
+
     /// Lightroom Clarity, −100...100. Midtone local contrast.
     var clarity: Float = 0
 
@@ -57,6 +75,14 @@ struct PositiveFilmProfile: Codable, Equatable {
 
     /// Lightroom Vibrance, −100...100.
     var vibrance: Float = 25
+
+    /// Lightroom Saturation, −100...100. Every colour by the same amount,
+    /// where Vibrance holds back on the ones that are already strong.
+    var saturation: Float = 0
+
+    /// Lightroom Dehaze, −100...100. Positive takes the veil a haze lays over
+    /// distance out of the frame; negative lays one on.
+    var dehaze: Float = 0
 
     /// Renders the frame monochrome.
     ///
@@ -75,6 +101,12 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// units. This is the matte foot; 0 gives a true black.
     var blackLift: Float = 0.086
 
+    /// The region curve: Highlights, Lights, Darks and Shadows.
+    var parametricCurve = ParametricCurve()
+
+    /// The point curve, drawn by hand, for all three channels and for each.
+    var pointCurve = PointCurves()
+
     // MARK: - Colour mixer (HSL)
 
     struct HSLBand: Codable, Equatable {
@@ -85,6 +117,8 @@ struct PositiveFilmProfile: Codable, Equatable {
         var hue: Float
         /// Lightroom Saturation slider for the band, −100...100.
         var saturation: Float
+        /// Lightroom Luminance slider for the band, −100...100.
+        var luminance: Float = 0
     }
 
     /// The Positive Film look isolates reds and blues while crushing and
@@ -127,12 +161,60 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// has almost none and stays blue; skin goes pale. A phone's sensor sits
     /// behind a filter that stops infrared, so the infrared record here is an
     /// estimate made from the colour of the scene — see
-    /// `PositiveFilmFilter.infrared` — and the other two are the real thing,
+    /// `Grade.infrared` — and the other two are the real thing,
     /// moved along.
     ///
     /// Zero by default, and set by the Infrared sub-profile rather than kept
     /// in the base look.
     var infrared: Float = 0
+
+    // MARK: - Colour grading
+
+    /// Shadows, midtones, highlights and global wheels, with blending and
+    /// balance. Neutral by default.
+    var colorGrade = ColorGrade()
+
+    // MARK: - Detail
+
+    /// Lightroom Sharpening Radius, 0.5...3. One is where the sharpening pass
+    /// has always sat; the amount is `sharpness`, above.
+    var sharpenRadius: Float = 1
+
+    /// Lightroom Noise Reduction, Luminance, 0...100.
+    var luminanceNoiseReduction: Float = 0
+
+    /// Lightroom Noise Reduction, Color, 0...100: the coloured speckle in a
+    /// dark frame, smoothed without touching how light or dark anything is.
+    var colorNoiseReduction: Float = 0
+
+    // MARK: - Effects
+
+    /// Lightroom Post-Crop Vignetting Amount, −100...100. Negative darkens the
+    /// corners, positive lightens them.
+    var vignetteAmount: Float = 0
+    /// How far in the vignette begins, 0...100. Lightroom's default is 50.
+    var vignetteMidpoint: Float = 50
+    /// How softly it fades in, 0...100. Lightroom's default is 50.
+    var vignetteFeather: Float = 50
+
+    /// Lightroom Grain Amount, 0...100.
+    var grainAmount: Float = 0
+    /// Lightroom Grain Size, 0...100. Lightroom's default is 25.
+    var grainSize: Float = 25
+    /// Lightroom Grain Roughness, 0...100: how uneven the grain is from one
+    /// clump to the next. Lightroom's default is 50.
+    var grainRoughness: Float = 50
+
+    // MARK: - Geometry
+
+    /// Straighten, in degrees, −45...45. The frame is rotated and scaled up
+    /// just far enough that the square stays filled.
+    var straighten: Float = 0
+    /// Lightroom Transform Vertical, −100...100: converging verticals pulled
+    /// upright, or pushed further apart.
+    var perspectiveVertical: Float = 0
+    /// Lightroom Transform Horizontal, −100...100.
+    var perspectiveHorizontal: Float = 0
 
     // MARK: - RAW
 
@@ -232,6 +314,18 @@ struct PositiveFilmProfile: Codable, Equatable {
     /// theatrical.
     var temperatureAmount: Float { temperature / 100 * 0.25 }
 
+    /// How far green is pulled against red and blue, ±0.2 at full deflection.
+    var tintAmount: Float { tint / 100 * 0.2 }
+
+    /// How far the white point moves, in output units, at full deflection.
+    var whitesShift: Float { whites / 100 * 0.15 }
+
+    /// Multiplier for the global Saturation slider.
+    var saturationScale: Float { PositiveFilmProfile.saturationMultiplier(saturation) }
+
+    /// Dehaze, −1...1.
+    var dehazeAmount: Float { min(max(dehaze, -100), 100) / 100 }
+
     /// Blend amount for the contrast S-curve (see `sCurve(_:amount:)`).
     var contrastAmount: Float { contrast / 100 }
 
@@ -265,7 +359,21 @@ struct PositiveFilmProfile: Codable, Equatable {
 
     /// A much narrower radius than clarity's — detail rather than local
     /// contrast — and relative for the same reason.
-    var sharpnessRadiusFraction: Float { 0.0012 }
+    var sharpnessRadiusFraction: Float { 0.0012 * min(max(sharpenRadius, 0.5), 3) }
+
+    /// Texture as an unsharp mask between the two: wider than sharpening's,
+    /// far narrower than clarity's.
+    var textureRadiusFraction: Float { 0.0045 }
+    var textureAmount: Float { min(max(texture, -100), 100) / 100 }
+
+    /// `CINoiseReduction.noiseLevel`, 0...0.08.
+    var luminanceNoiseLevel: Float { min(max(luminanceNoiseReduction, 0), 100) / 100 * 0.08 }
+    var colorNoiseAmount: Float { min(max(colorNoiseReduction, 0), 100) / 100 }
+
+    /// Whether any of the geometry sliders has moved.
+    var hasGeometry: Bool {
+        straighten != 0 || perspectiveVertical != 0 || perspectiveHorizontal != 0
+    }
 
     /// `CIRAWFilter.boostAmount`, 0...1.
     var rawBoostAmount: Float { rawBoost / 100 }
@@ -286,13 +394,19 @@ struct PositiveFilmProfile: Codable, Equatable {
 extension PositiveFilmProfile {
 
     enum CodingKeys: String, CodingKey {
-        case temperature
-        case exposure, contrast, highlights, shadows, blacks, clarity, sharpness, vibrance
+        case temperature, tint
+        case exposure, contrast, highlights, shadows, whites, blacks
+        case texture, clarity, dehaze, sharpness, vibrance, saturation
         case blackAndWhite
-        case toneCurveS, blackLift
+        case toneCurveS, blackLift, parametricCurve, pointCurve
         case bands
         case redPrimary, greenPrimary, bluePrimary
         case infrared
+        case colorGrade
+        case sharpenRadius, luminanceNoiseReduction, colorNoiseReduction
+        case vignetteAmount, vignetteMidpoint, vignetteFeather
+        case grainAmount, grainSize, grainRoughness
+        case straighten, perspectiveVertical, perspectiveHorizontal
         case rawBoost
         case subProfiles, overrides
     }
@@ -312,18 +426,46 @@ extension PositiveFilmProfile {
             ((try? container.decodeIfPresent(Bool.self, forKey: key)) ?? nil) ?? fallback
         }
 
+        func value<T: Decodable>(_ type: T.Type, _ key: CodingKeys, _ fallback: T) -> T {
+            ((try? container.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
+        }
+
         temperature = float(.temperature, temperature)
+        tint       = float(.tint, tint)
         exposure   = float(.exposure, exposure)
         contrast   = float(.contrast, contrast)
         highlights = float(.highlights, highlights)
         shadows    = float(.shadows, shadows)
+        whites     = float(.whites, whites)
         blacks     = float(.blacks, blacks)
+        texture    = float(.texture, texture)
         clarity    = float(.clarity, clarity)
+        dehaze     = float(.dehaze, dehaze)
         sharpness  = float(.sharpness, sharpness)
         vibrance   = float(.vibrance, vibrance)
+        saturation = float(.saturation, saturation)
         blackAndWhite = bool(.blackAndWhite, blackAndWhite)
         toneCurveS = float(.toneCurveS, toneCurveS)
         blackLift  = float(.blackLift, blackLift)
+        parametricCurve = value(ParametricCurve.self, .parametricCurve, parametricCurve)
+        pointCurve = value(PointCurves.self, .pointCurve, pointCurve)
+
+        colorGrade = value(ColorGrade.self, .colorGrade, colorGrade)
+
+        sharpenRadius = float(.sharpenRadius, sharpenRadius)
+        luminanceNoiseReduction = float(.luminanceNoiseReduction, luminanceNoiseReduction)
+        colorNoiseReduction = float(.colorNoiseReduction, colorNoiseReduction)
+
+        vignetteAmount   = float(.vignetteAmount, vignetteAmount)
+        vignetteMidpoint = float(.vignetteMidpoint, vignetteMidpoint)
+        vignetteFeather  = float(.vignetteFeather, vignetteFeather)
+        grainAmount      = float(.grainAmount, grainAmount)
+        grainSize        = float(.grainSize, grainSize)
+        grainRoughness   = float(.grainRoughness, grainRoughness)
+
+        straighten            = float(.straighten, straighten)
+        perspectiveVertical   = float(.perspectiveVertical, perspectiveVertical)
+        perspectiveHorizontal = float(.perspectiveHorizontal, perspectiveHorizontal)
 
         infrared    = float(.infrared, infrared)
         rawBoost    = float(.rawBoost, rawBoost)
@@ -357,6 +499,25 @@ extension PositiveFilmProfile {
     }
 }
 
+/// Bands saved before the mixer had a Luminance row still load, with
+/// Luminance at zero — synthesised decoding would throw on the missing key and
+/// take the whole mixer back to the built-in one.
+extension PositiveFilmProfile.HSLBand {
+
+    enum CodingKeys: String, CodingKey {
+        case name, center, hue, saturation, luminance
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        center = try container.decode(Float.self, forKey: .center)
+        hue = try container.decode(Float.self, forKey: .hue)
+        saturation = try container.decode(Float.self, forKey: .saturation)
+        luminance = ((try? container.decodeIfPresent(Float.self, forKey: .luminance)) ?? nil) ?? 0
+    }
+}
+
 // MARK: - What has been changed
 
 extension PositiveFilmProfile {
@@ -378,27 +539,79 @@ extension PositiveFilmProfile {
             lines.append("\(label): \(formatted)")
         }
 
-        compare("Temperature", temperature, base.temperature)
+        // Light
         compare("Exposure", exposure, base.exposure, decimals: 2)
         compare("Contrast", contrast, base.contrast)
         compare("Highlights", highlights, base.highlights)
         compare("Shadows", shadows, base.shadows)
+        compare("Whites", whites, base.whites)
         compare("Blacks", blacks, base.blacks)
-        compare("Clarity", clarity, base.clarity)
-        compare("Sharpness", sharpness, base.sharpness)
+
+        // Curve
+        compare("Curve Highlights", parametricCurve.highlights, base.parametricCurve.highlights)
+        compare("Curve Lights", parametricCurve.lights, base.parametricCurve.lights)
+        compare("Curve Darks", parametricCurve.darks, base.parametricCurve.darks)
+        compare("Curve Shadows", parametricCurve.shadows, base.parametricCurve.shadows)
+        for (name, curve) in [("RGB", pointCurve.master), ("Red", pointCurve.red),
+                              ("Green", pointCurve.green), ("Blue", pointCurve.blue)]
+        where !curve.isIdentity {
+            let points = curve.points
+                .sorted { $0.x < $1.x }
+                .map { "\(Int(($0.x * 255).rounded())),\(Int(($0.y * 255).rounded()))" }
+                .joined(separator: " ")
+            lines.append("\(name) Curve: \(points)")
+        }
+        compare("S-Curve", toneCurveS, base.toneCurveS)
+        compare("Black Lift", blackLift, base.blackLift, decimals: 3)
+
+        // Color
+        compare("Temperature", temperature, base.temperature)
+        compare("Tint", tint, base.tint)
         compare("Vibrance", vibrance, base.vibrance)
+        compare("Saturation", saturation, base.saturation)
         if blackAndWhite != base.blackAndWhite {
             lines.append("Black & White: \(blackAndWhite ? "on" : "off")")
         }
-
-        compare("S-Curve", toneCurveS, base.toneCurveS)
-        compare("Black Lift", blackLift, base.blackLift, decimals: 3)
 
         for band in bands {
             guard let reference = base.bands.first(where: { $0.name == band.name }) else { continue }
             compare("\(band.name) Hue", band.hue, reference.hue)
             compare("\(band.name) Saturation", band.saturation, reference.saturation)
+            compare("\(band.name) Luminance", band.luminance, reference.luminance)
         }
+
+        // Grading
+        for (name, wheel, reference) in [("Shadows", colorGrade.shadows, base.colorGrade.shadows),
+                                         ("Midtones", colorGrade.midtones, base.colorGrade.midtones),
+                                         ("Highlights", colorGrade.highlights, base.colorGrade.highlights),
+                                         ("Global", colorGrade.global, base.colorGrade.global)]
+        where wheel != reference {
+            lines.append("Grading \(name): hue \(Int(wheel.hue.rounded())), saturation \(Int(wheel.saturation.rounded())), luminance \(Int(wheel.luminance.rounded()))")
+        }
+        compare("Grading Blending", colorGrade.blending, base.colorGrade.blending)
+        compare("Grading Balance", colorGrade.balance, base.colorGrade.balance)
+
+        // Effects
+        compare("Texture", texture, base.texture)
+        compare("Clarity", clarity, base.clarity)
+        compare("Dehaze", dehaze, base.dehaze)
+        compare("Vignette", vignetteAmount, base.vignetteAmount)
+        compare("Vignette Midpoint", vignetteMidpoint, base.vignetteMidpoint)
+        compare("Vignette Feather", vignetteFeather, base.vignetteFeather)
+        compare("Grain", grainAmount, base.grainAmount)
+        compare("Grain Size", grainSize, base.grainSize)
+        compare("Grain Roughness", grainRoughness, base.grainRoughness)
+
+        // Detail
+        compare("Sharpness", sharpness, base.sharpness)
+        compare("Sharpen Radius", sharpenRadius, base.sharpenRadius, decimals: 1)
+        compare("Noise Reduction", luminanceNoiseReduction, base.luminanceNoiseReduction)
+        compare("Color Noise Reduction", colorNoiseReduction, base.colorNoiseReduction)
+
+        // Geometry
+        compare("Straighten", straighten, base.straighten, decimals: 1)
+        compare("Vertical", perspectiveVertical, base.perspectiveVertical)
+        compare("Horizontal", perspectiveHorizontal, base.perspectiveHorizontal)
 
         for (name, primary, reference) in [("Red", redPrimary, base.redPrimary),
                                            ("Green", greenPrimary, base.greenPrimary),

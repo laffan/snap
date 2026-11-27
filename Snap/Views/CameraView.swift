@@ -186,6 +186,7 @@ struct CameraView: View {
 
                 if isDeveloping {
                     DevelopPanel(look: camera.look,
+                                 renderer: camera.renderer,
                                  isRAWAvailable: camera.isRAWAvailable,
                                  negativeStatus: camera.negativeStatus,
                                  isMonochromeLocked: camera.isMonochromeLocked,

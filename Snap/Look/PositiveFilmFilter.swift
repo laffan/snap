@@ -11,8 +11,10 @@
 //  texture fetch no matter how elaborate the grade gets, and guarantees the
 //  preview and the saved file go through the exact same maths.
 //
-//  The adjustments that are *not* per-pixel — highlight/shadow recovery,
-//  exposure, clarity and sharpening — stay as real filters around the LUT.
+//  The adjustments that are *not* per-pixel — geometry, exposure,
+//  highlight/shadow recovery, noise reduction, texture, clarity, sharpening,
+//  the vignette and grain — stay as real filters around the LUT. The maths of
+//  the LUT itself is in `Grade`.
 //
 
 import CoreImage
@@ -69,9 +71,13 @@ final class PositiveFilmFilter {
         let extent = image.extent
         guard !extent.isEmpty, !extent.isInfinite else { return image }
 
+        // 0. Geometry, before anything else, the way Lightroom does it: every
+        //    stage after this one is working on the frame as it will be framed.
+        let framed = profile.hasGeometry ? transformed(image) : image
+
         // Sampling past the edges keeps the blur-based stages from darkening
         // the border; we crop back to the original extent at the end.
-        var output = image.clampedToExtent()
+        var output = framed.clampedToExtent()
 
         // 1. Exposure, first, so everything downstream sees the tones the
         //    photograph is actually meant to have. Moved along a shoulder
@@ -93,19 +99,23 @@ final class PositiveFilmFilter {
         highlightShadow.shadowAmount = profile.shadowAmount
         output = highlightShadow.outputImage ?? output
 
-        // 3. Clarity and sharpening are the same operation at two scales: a
-        //    wide, gentle unsharp mask reads as midtone local contrast, a
-        //    narrow one reads as detail. Both radii scale with the image so
-        //    preview and capture match.
         let shortEdge = Float(min(extent.width, extent.height))
 
-        if profile.clarityIntensity > 0 {
-            let clarity = CIFilter.unsharpMask()
-            clarity.inputImage = output
-            clarity.radius = max(1, shortEdge * profile.clarityRadiusFraction)
-            clarity.intensity = profile.clarityIntensity
-            output = clarity.outputImage ?? output
-        }
+        // 3. Noise reduction, before anything sharpens the noise it is there
+        //    to remove.
+        output = denoised(output, shortEdge: shortEdge)
+
+        // 4. Texture, clarity and sharpening are the same operation at three
+        //    scales: a wide, gentle unsharp mask reads as midtone local
+        //    contrast, a middling one as texture, a narrow one as detail. All
+        //    three radii scale with the image so preview and capture match,
+        //    and each softens instead when it is taken below zero.
+        output = locallyContrasted(output,
+                                   amount: profile.textureAmount * 0.6,
+                                   radius: shortEdge * profile.textureRadiusFraction)
+        output = locallyContrasted(output,
+                                   amount: profile.clarityIntensity,
+                                   radius: shortEdge * profile.clarityRadiusFraction)
 
         if profile.sharpnessIntensity > 0 {
             let sharpen = CIFilter.unsharpMask()
@@ -115,7 +125,7 @@ final class PositiveFilmFilter {
             output = sharpen.outputImage ?? output
         }
 
-        // 4. The grade itself.
+        // 5. The grade itself.
         let cube = CIFilter.colorCubeWithColorSpace()
         cube.inputImage = output
         cube.cubeDimension = Float(resolution.rawValue)
@@ -123,7 +133,281 @@ final class PositiveFilmFilter {
         cube.colorSpace = workingColorSpace
         output = cube.outputImage ?? output
 
+        // 6. The effects, over the finished picture: a vignette is a thing
+        //    done to a print, and grain is the print's own.
+        output = vignetted(output, extent: extent)
+        output = grained(output, shortEdge: shortEdge)
+
         return output.cropped(to: extent)
+    }
+
+    // MARK: - Local contrast
+
+    /// An unsharp mask for positive amounts, and a blend toward the blur for
+    /// negative ones — which is what taking clarity or texture below zero is:
+    /// the same band of detail, turned down instead of up.
+    private func locallyContrasted(_ image: CIImage, amount: Float, radius: Float) -> CIImage {
+        guard amount != 0 else { return image }
+        let radius = max(1, radius)
+
+        if amount > 0 {
+            let mask = CIFilter.unsharpMask()
+            mask.inputImage = image
+            mask.radius = radius
+            mask.intensity = amount
+            return mask.outputImage ?? image
+        }
+
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = image
+        blur.radius = radius
+        guard let blurred = blur.outputImage else { return image }
+
+        let blend = CIFilter.dissolveTransition()
+        blend.inputImage = image
+        blend.targetImage = blurred
+        blend.time = min(-amount * 0.6, 1)
+        return blend.outputImage ?? image
+    }
+
+    // MARK: - Noise reduction
+
+    private func denoised(_ image: CIImage, shortEdge: Float) -> CIImage {
+        var output = image
+
+        let level = profile.luminanceNoiseLevel
+        if level > 0 {
+            let reduction = CIFilter.noiseReduction()
+            reduction.inputImage = output
+            reduction.noiseLevel = level
+            reduction.sharpness = 0.4
+            output = reduction.outputImage ?? output
+        }
+
+        // Colour noise is speckle in hue, not in brightness. So the colour of
+        // a blurred copy is laid under the brightness of the frame itself:
+        // the speckle averages out and every edge stays exactly where it was.
+        let colorAmount = profile.colorNoiseAmount
+        if colorAmount > 0 {
+            let blur = CIFilter.gaussianBlur()
+            blur.inputImage = output
+            blur.radius = max(1, shortEdge * 0.004)
+
+            let luminosity = CIFilter.luminosityBlendMode()
+            luminosity.inputImage = output
+            luminosity.backgroundImage = blur.outputImage
+
+            if let smoothed = luminosity.outputImage {
+                let blend = CIFilter.dissolveTransition()
+                blend.inputImage = output
+                blend.targetImage = smoothed
+                blend.time = colorAmount
+                output = blend.outputImage ?? output
+            }
+        }
+
+        return output
+    }
+
+    // MARK: - Vignette
+
+    /// Lightroom's post-crop vignette: the corners darkened or lightened by
+    /// Amount, from a ring set by Midpoint, faded in over Feather.
+    ///
+    /// Round, because the frame is square, and a vignette that follows a
+    /// square frame's own shape is the round one.
+    private func vignetted(_ image: CIImage, extent: CGRect) -> CIImage {
+        let amount = min(max(profile.vignetteAmount, -100), 100) / 100
+        guard amount != 0 else { return image }
+
+        let halfDiagonal = Float(hypot(extent.width, extent.height) / 2)
+        let midpoint = min(max(profile.vignetteMidpoint, 0), 100) / 100
+        let feather = min(max(profile.vignetteFeather, 0), 100) / 100
+
+        let ring = halfDiagonal * (0.35 + 0.6 * midpoint)
+        let inner = max(0, ring * (1 - 0.7 * feather) - halfDiagonal * 0.02)
+        let outer = max(inner + 1, ring * (1 + 0.5 * feather) + halfDiagonal * 0.02)
+
+        let gradient = CIFilter.radialGradient()
+        gradient.center = CGPoint(x: extent.midX, y: extent.midY)
+        gradient.radius0 = inner
+        gradient.radius1 = outer
+
+        if amount < 0 {
+            // Multiplied: white inside the ring changes nothing, the grey
+            // beyond it takes the corners down.
+            let edge = CGFloat(1 + amount)
+            gradient.color0 = CIColor(red: 1, green: 1, blue: 1)
+            gradient.color1 = CIColor(red: edge, green: edge, blue: edge)
+            guard let mask = gradient.outputImage else { return image }
+
+            let multiply = CIFilter.multiplyCompositing()
+            multiply.inputImage = mask
+            multiply.backgroundImage = image
+            return multiply.outputImage ?? image
+        }
+
+        // Screened: black inside the ring changes nothing, the grey beyond it
+        // lifts the corners toward white.
+        let edge = CGFloat(amount)
+        gradient.color0 = CIColor(red: 0, green: 0, blue: 0)
+        gradient.color1 = CIColor(red: edge, green: edge, blue: edge)
+        guard let mask = gradient.outputImage else { return image }
+
+        let screen = CIFilter.screenBlendMode()
+        screen.inputImage = mask
+        screen.backgroundImage = image
+        return screen.outputImage ?? image
+    }
+
+    // MARK: - Grain
+
+    /// Film grain, soft-lit over the finished picture.
+    ///
+    /// Monochrome noise from Core Image's generator, blown up to the grain's
+    /// size — which, like every other radius here, is a fraction of the
+    /// frame's short edge, so the preview and the capture carry the same grain
+    /// at their own resolutions. Roughness mixes in a second, finer layer from
+    /// another channel of the same noise, so the clumps stop being even.
+    /// Soft light leaves a grey of one half exactly where it was, which is
+    /// what makes the noise a texture rather than a change of exposure.
+    private func grained(_ image: CIImage, shortEdge: Float) -> CIImage {
+        let amount = min(max(profile.grainAmount, 0), 100) / 100
+        guard amount > 0, let noise = CIFilter.randomGenerator().outputImage else { return image }
+
+        let size = min(max(profile.grainSize, 0), 100) / 100
+        let roughness = min(max(profile.grainRoughness, 0), 100) / 100
+        let cell = CGFloat(max(0.5, shortEdge * (0.0006 + size * 0.0025)))
+
+        func channel(_ vector: CIVector) -> CIImage {
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = noise
+            matrix.rVector = vector
+            matrix.gVector = vector
+            matrix.bVector = vector
+            matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            matrix.biasVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            return matrix.outputImage ?? noise
+        }
+
+        let coarse = channel(CIVector(x: 1, y: 0, z: 0, w: 0))
+            .transformed(by: CGAffineTransform(scaleX: cell, y: cell))
+        let fine = channel(CIVector(x: 0, y: 1, z: 0, w: 0))
+            .transformed(by: CGAffineTransform(scaleX: cell * 0.5, y: cell * 0.5))
+
+        let mix = CIFilter.dissolveTransition()
+        mix.inputImage = coarse
+        mix.targetImage = fine
+        mix.time = roughness * 0.5
+        let grain = mix.outputImage ?? coarse
+
+        // Contrast around the middle grey: Amount is how far the grain
+        // reaches either side of it.
+        let strength = CGFloat(amount * 0.55)
+        let contrast = CIFilter.colorMatrix()
+        contrast.inputImage = grain
+        contrast.rVector = CIVector(x: strength, y: 0, z: 0, w: 0)
+        contrast.gVector = CIVector(x: 0, y: strength, z: 0, w: 0)
+        contrast.bVector = CIVector(x: 0, y: 0, z: strength, w: 0)
+        contrast.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        contrast.biasVector = CIVector(x: 0.5 - strength / 2, y: 0.5 - strength / 2,
+                                       z: 0.5 - strength / 2, w: 0)
+        guard let shaped = contrast.outputImage else { return image }
+
+        let softLight = CIFilter.softLightBlendMode()
+        softLight.inputImage = shaped
+        softLight.backgroundImage = image
+        return softLight.outputImage ?? image
+    }
+
+    // MARK: - Geometry
+
+    /// Straighten and the two perspective sliders, as one move of the frame's
+    /// four corners, scaled up just far enough that the square stays filled.
+    ///
+    /// Vertical widens the top edge and narrows the bottom — what pulls a
+    /// building that leans back upright — and Horizontal does the same across.
+    /// Then the whole is turned by Straighten, and the smallest scale found at
+    /// which the original square fits inside what came out. The frame loses
+    /// exactly what turning it costs and nothing more, and never shows an edge.
+    private func transformed(_ image: CIImage) -> CIImage {
+        let extent = image.extent
+        let corners = PositiveFilmFilter.geometryCorners(for: profile)
+
+        let halfWidth = extent.width / 2
+        let halfHeight = extent.height / 2
+        func placed(_ point: SIMD2<Float>) -> CGPoint {
+            CGPoint(x: extent.midX + CGFloat(point.x) * halfWidth,
+                    y: extent.midY + CGFloat(point.y) * halfHeight)
+        }
+
+        // A couple of pixels of the frame's own edge carried past it, so the
+        // resampled border is the photograph rather than a fade to nothing.
+        let padded = image.clampedToExtent().cropped(to: extent.insetBy(dx: -2, dy: -2))
+
+        let perspective = CIFilter.perspectiveTransform()
+        perspective.inputImage = padded
+        perspective.topLeft = placed(corners[0])
+        perspective.topRight = placed(corners[1])
+        perspective.bottomRight = placed(corners[2])
+        perspective.bottomLeft = placed(corners[3])
+        guard let output = perspective.outputImage else { return image }
+        return output.cropped(to: extent)
+    }
+
+    /// Where the frame's corners go, in a square of side two centred on the
+    /// origin, y up: top-left, top-right, bottom-right, bottom-left.
+    static func geometryCorners(for profile: PositiveFilmProfile) -> [SIMD2<Float>] {
+        let vertical = min(max(profile.perspectiveVertical, -100), 100) / 100 * 0.3
+        let horizontal = min(max(profile.perspectiveHorizontal, -100), 100) / 100 * 0.3
+        let angle = min(max(profile.straighten, -45), 45) * .pi / 180
+
+        var corners: [SIMD2<Float>] = [
+            SIMD2(-(1 + vertical), 1 - horizontal),
+            SIMD2(1 + vertical, 1 + horizontal),
+            SIMD2(1 - vertical, -(1 + horizontal)),
+            SIMD2(-(1 - vertical), -(1 - horizontal)),
+        ]
+
+        let cosine = cos(angle)
+        let sine = sin(angle)
+        corners = corners.map { SIMD2($0.x * cosine - $0.y * sine, $0.x * sine + $0.y * cosine) }
+
+        // The smallest scale at which the square [−1, 1]² sits inside the
+        // quad. It is convex whatever the sliders say, so the square's four
+        // corners being inside is the whole test.
+        let square: [SIMD2<Float>] = [SIMD2(-1, 1), SIMD2(1, 1), SIMD2(1, -1), SIMD2(-1, -1)]
+        func covers(_ scale: Float) -> Bool {
+            let quad = corners.map { $0 * scale }
+            return square.allSatisfy { contains(quad, $0) }
+        }
+
+        var low: Float = 0.25
+        var high: Float = 8
+        if covers(1) { high = 1 }
+        for _ in 0..<40 {
+            let middle = (low + high) / 2
+            if covers(middle) { high = middle } else { low = middle }
+        }
+        let scale = high * 1.002
+        return corners.map { $0 * scale }
+    }
+
+    /// Whether `point` is inside the convex quad, edges included.
+    private static func contains(_ quad: [SIMD2<Float>], _ point: SIMD2<Float>) -> Bool {
+        var sign: Float = 0
+        for index in 0..<quad.count {
+            let a = quad[index]
+            let b = quad[(index + 1) % quad.count]
+            let cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+            if abs(cross) < 1e-6 { continue }
+            if sign == 0 {
+                sign = cross > 0 ? 1 : -1
+            } else if (cross > 0 ? 1 : -1) != sign {
+                return false
+            }
+        }
+        return true
     }
 
     // MARK: - Exposure
@@ -188,8 +472,7 @@ final class PositiveFilmFilter {
     // MARK: - Baking the lookup table
 
     private static func makeCubeData(profile: PositiveFilmProfile, dimension: Int) -> Data {
-        let calibration = calibrationMatrix(for: profile)
-        let bands = resolvedBands(for: profile)
+        let grade = Grade(profile: profile)
 
         let entryCount = dimension * dimension * dimension
         var values = [Float](repeating: 0, count: entryCount * 4)
@@ -203,10 +486,7 @@ final class PositiveFilmFilter {
                 for redIndex in 0..<dimension {
                     let red = Float(redIndex) / step
 
-                    let graded = grade(RGB(red, green, blue),
-                                       profile: profile,
-                                       calibration: calibration,
-                                       bands: bands)
+                    let graded = grade(RGB(red, green, blue))
 
                     values[offset + 0] = graded.x
                     values[offset + 1] = graded.y
@@ -218,176 +498,5 @@ final class PositiveFilmFilter {
         }
 
         return values.withUnsafeBufferPointer { Data(buffer: $0) }
-    }
-
-    /// The per-pixel grade, in the order Lightroom applies it: white balance,
-    /// camera calibration, then the basic panel (blacks, contrast, vibrance),
-    /// then the colour mixer, then the point curve.
-    private static func grade(_ input: RGB,
-                              profile: PositiveFilmProfile,
-                              calibration: simd_float3x3,
-                              bands: [ResolvedBand]) -> RGB {
-        // First, as white balance always is: everything downstream is built on
-        // an assumption about what colour the light was.
-        var color = clamp01(whiteBalanced(input, amount: profile.temperatureAmount))
-        color = clamp01(calibration * color)
-        // The scene as the sensor saw it, before the look has had its say
-        // about greens — which is the only thing the infrared estimate can be
-        // made from, and the look would otherwise have crushed half of it.
-        let scene = color
-        color = clamp01(shiftBlacks(color, by: profile.blacksShift))
-        color = sCurve(color, amount: profile.contrastAmount)
-        color = clamp01(applyVibrance(color, amount: profile.vibranceAmount))
-        color = applyColorMixer(color, bands: bands)
-
-        // After the mixer rather than before it: the look takes Purple and
-        // Magenta almost out, and those are exactly the colours infrared
-        // foliage comes out as.
-        let infraredAmount = profile.infraredAmount
-        if infraredAmount > 0 {
-            color = infrared(color, scene: scene, amount: infraredAmount)
-        }
-
-        color = sCurve(color, amount: profile.toneCurveAmount)
-        color = liftBlacks(color, by: profile.blackLift)
-
-        // Last, so the colour mixer still shapes the result: a band that was
-        // desaturated arrives here darker or lighter than one that wasn't,
-        // which is exactly how a black-and-white mixer works.
-        if profile.blackAndWhite {
-            let graded = clamp01(color)
-            // Black-and-white infrared is the infrared record on its own:
-            // white trees under a black sky. After the mapping above, that
-            // record is the red channel.
-            color = RGB(repeating: lerp(luma(graded), graded.x, infraredAmount))
-        }
-
-        return clamp01(color)
-    }
-
-    // MARK: - Infrared
-
-    /// Colour infrared film, laid over the grade by `amount`.
-    ///
-    /// The film's three layers each see one band further down the spectrum
-    /// than their dye shows: red shows infrared, green shows red, blue shows
-    /// green, and blue light is filtered out altogether. So the graded red
-    /// moves to green, the graded green to blue, and red is given the
-    /// infrared record.
-    ///
-    /// There is no infrared record to give it — the sensor sits behind a
-    /// filter that stops it — so one is estimated from the scene. What
-    /// reflects infrared brightly is mostly what is green: leaves and grass,
-    /// whose chlorophyll is transparent to it. What reflects almost none is
-    /// what is blue: sky and water. So the estimate is the scene's brightness,
-    /// leaning on green, raised by how much greener than blue a colour is and
-    /// lowered by how much bluer. Its weights sum to one over a neutral, so a
-    /// grey wall stays grey and white stays white.
-    ///
-    /// Foliage comes out red to magenta, sky deep blue, skin pale cream, and a
-    /// red flower yellow-green — the four things the film is recognised by.
-    private static func infrared(_ graded: RGB, scene: RGB, amount: Float) -> RGB {
-        let record = clamp01(0.25 * scene.x + 0.75 * scene.y + (scene.y - scene.z))
-        let shifted = RGB(record, graded.x, graded.y)
-        return clamp01(graded + (shifted - graded) * amount)
-    }
-
-    // MARK: - HSL colour mixer
-
-    /// A band with its sliders already converted to degrees and a multiplier.
-    private struct ResolvedBand {
-        var center: Float
-        var hueShift: Float
-        var saturationScale: Float
-    }
-
-    private static func resolvedBands(for profile: PositiveFilmProfile) -> [ResolvedBand] {
-        let sorted = profile.bands.sorted { $0.center < $1.center }
-        var resolved = sorted.map {
-            ResolvedBand(center: $0.center,
-                         hueShift: $0.hue * PositiveFilmProfile.degreesPerHueUnit,
-                         saturationScale: PositiveFilmProfile.saturationMultiplier($0.saturation))
-        }
-        // Repeat the first band at 360° so hue interpolation wraps cleanly
-        // through magenta and back into red.
-        if var wrapped = resolved.first {
-            wrapped.center += 360
-            resolved.append(wrapped)
-        }
-        return resolved
-    }
-
-    private static func applyColorMixer(_ color: RGB, bands: [ResolvedBand]) -> RGB {
-        guard bands.count > 1 else { return color }
-
-        var hsv = rgbToHSV(color)
-
-        // Near-neutral pixels have a meaningless hue, so shifting them would
-        // just add noise. Fade the mixer in as saturation rises.
-        let influence = smoothstep(0.03, 0.18, hsv.y)
-        guard influence > 0 else { return color }
-
-        // Linearly blend between the two bands bracketing this hue. Adjacent
-        // weights always sum to 1, so the transitions stay smooth and no hue
-        // is left ungoverned.
-        var hueShift: Float = 0
-        var saturationScale: Float = 1
-        for index in 0..<(bands.count - 1) {
-            let lower = bands[index]
-            let upper = bands[index + 1]
-            guard hsv.x >= lower.center, hsv.x <= upper.center else { continue }
-
-            let span = upper.center - lower.center
-            let t = span > 0 ? (hsv.x - lower.center) / span : 0
-            hueShift = lerp(lower.hueShift, upper.hueShift, t)
-            saturationScale = lerp(lower.saturationScale, upper.saturationScale, t)
-            break
-        }
-
-        hsv.x += hueShift * influence
-        hsv.y = clamp01(hsv.y * lerp(1, saturationScale, influence))
-        return hsvToRGB(hsv)
-    }
-
-    // MARK: - Camera calibration
-
-    /// Builds a 3×3 matrix whose columns are the rotated, saturation-adjusted
-    /// primaries. The rows are then normalised so that white maps to white,
-    /// which keeps neutrals neutral — the whole point of a calibration pass is
-    /// to move colours without introducing a global cast.
-    private static func calibrationMatrix(for profile: PositiveFilmProfile) -> simd_float3x3 {
-        let columns = [
-            adjustedPrimary(RGB(1, 0, 0), profile.redPrimary),
-            adjustedPrimary(RGB(0, 1, 0), profile.greenPrimary),
-            adjustedPrimary(RGB(0, 0, 1), profile.bluePrimary),
-        ]
-
-        var matrix = simd_float3x3(columns: (columns[0], columns[1], columns[2]))
-
-        // Row i sums to whatever white currently maps to on channel i.
-        let white = matrix * RGB(repeating: 1)
-        for row in 0..<3 {
-            let scale = white[row] != 0 ? 1 / white[row] : 1
-            matrix[0][row] *= scale
-            matrix[1][row] *= scale
-            matrix[2][row] *= scale
-        }
-        return matrix
-    }
-
-    /// Rotates a primary's hue and scales its saturation *around its own
-    /// luminance*, so desaturating a primary greys it down rather than
-    /// contaminating the other two channels with white.
-    ///
-    /// The result is deliberately not clamped — small negative coefficients are
-    /// normal in a colour matrix and are what let a primary gain saturation.
-    private static func adjustedPrimary(_ primary: RGB, _ settings: PositiveFilmProfile.Primary) -> RGB {
-        var hsv = rgbToHSV(primary)
-        hsv.x += settings.hue * PositiveFilmProfile.degreesPerCalibrationUnit
-        let rotated = hsvToRGB(hsv)
-
-        let scale = PositiveFilmProfile.saturationMultiplier(settings.saturation)
-        let grey = RGB(repeating: luma(rotated))
-        return grey + (rotated - grey) * scale
     }
 }

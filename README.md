@@ -55,7 +55,13 @@ resolution.
 | `Views/CaptionField.swift` | The line under a frame being reviewed |
 | `Views/ShotThumbnail.swift` | One frame as a square, in the roll and in the favourites |
 | `Views/ActionBar.swift` | The one row of buttons, and the handle that resizes the panel |
-| `Views/DevelopPanel.swift` | The slider editor |
+| `Views/DevelopPanel.swift` | The develop editor: histogram, tools, and what each tool holds |
+| `Views/DevelopControls.swift` | The develop slider and section heading, and the touch handling under them |
+| `Views/ToneCurveEditor.swift` | The point curve, drawn and dragged by hand |
+| `Views/ColorWheel.swift` | One colour-grading wheel |
+| `Views/HistogramView.swift` | The histogram read off whatever the viewer is showing |
+| `Look/Grade.swift` | The per-pixel grade that is baked into the look's LUT |
+| `Look/ToneCurve.swift` | Point curves, the region curve and the colour-grading wheels as data |
 | `Views/LoupeView.swift` | The frame at 100%, under a finger |
 | `Views/FavoritesList.swift` | The kept frames, and the heart that opens them |
 | `Library/BackupFolder.swift` | The folder the user picked, and how the app gets back into it |
@@ -146,9 +152,16 @@ This is the payoff for keeping the profile in Lightroom slider units from the
 start: `crs:` properties take those numbers directly. Contrast 28 becomes
 `crs:Contrast2012="28"`, the Green band's teal shift becomes
 `crs:HueAdjustmentGreen="35"`, the blue primary becomes `crs:BlueHue` and
-`crs:BlueSaturation`. Only two stages need converting — the tone curve is
-sampled into `crs:ToneCurvePV2012` control points, and the square becomes the
-`crs:Crop*` fractions.
+`crs:BlueSaturation`. Only a few stages need converting — the look's S-curve,
+the RGB point curve and the black lift are sampled together into
+`crs:ToneCurvePV2012` control points, each channel's point curve goes into its
+own `ToneCurvePV2012Red`, `Green` or `Blue`, and the square becomes the
+`crs:Crop*` fractions, with Straighten as `crs:CropAngle`.
+
+The names line up with Lightroom's panels, but the arithmetic under each slider
+is this app's own, so a negative opens close to the JPEG rather than identical
+to it — most of all for the newer tools: colour grading, the region curve,
+dehaze, texture, grain, the vignette and the perspective corrections.
 
 **Share RAW sends the DNG and its sidecar together.** Apart they mean nothing;
 Adobe finds the sidecar by matching base names in the same folder.
@@ -1446,9 +1459,57 @@ only that one costs a re-develop.
 ## The develop editor
 
 **Develop**, at the left of the action bar, fills everything below the bar with
-every knob the look exposes and lights while it does, grouped the way Lightroom
-groups them — Basic, Tone Curve, Color Mixer, Calibration, RAW. Moving a slider
-regrades the live preview. Double-tap any slider to return it to neutral.
+every knob the look exposes and lights while it does. It is laid out the way
+Lightroom's develop module is on a phone: a histogram across the top, one tool
+open at a time, and the row of tools along the bottom, where the thumb already
+is — **Light, Curve, Color, Grading, Effects, Detail, Geometry, Calibrate,
+RAW**. A dot over a tool means something in it has moved off the look; the last
+tool used is the one that opens next time. Moving a slider regrades the live
+preview.
+
+It used to be one long list of collapsible groups. Forty-odd sliders in a list
+is a wall however it folds, and the group being worked on shared the screen with
+every group that wasn't.
+
+### The tools
+
+- **Light:** Exposure, Contrast, Highlights, Shadows, Whites, Blacks.
+- **Curve:** the region curve (Highlights, Lights, Darks, Shadows) or a point
+  curve for RGB, Red, Green or Blue, drawn over the frame's own histogram. Touch
+  the curve to add a point and drag it; drag a point out of the box to take it
+  off; double-tap to straighten. Under it, the look's own S-curve and black lift,
+  which every frame wears beneath whatever is drawn above.
+- **Color:** Color or Black & White, white balance (Temperature and Tint),
+  Vibrance and Saturation, and the colour mixer — one band at a time, picked from
+  a row of its colours, with Hue, Saturation and Luminance.
+- **Grading:** shadow, midtone, highlight and global wheels, each with its own
+  Luminance, and Blending and Balance for where the three ranges meet.
+- **Effects:** Texture, Clarity and Dehaze; a post-crop vignette (Amount,
+  Midpoint, Feather); and grain (Amount, Size, Roughness).
+- **Detail:** sharpening (Amount, Radius) and noise reduction (Luminance,
+  Color).
+- **Geometry:** Straighten and the two perspective corrections. The square is
+  kept full: turning or tilting the frame scales it up just far enough that no
+  corner shows an edge.
+- **Calibrate:** the three primaries and the Infrared amount.
+- **RAW:** what landed in the last negative, the Apple Tone Curve, Load and Save,
+  and Copy Adjustments.
+
+### How the controls behave
+
+A slider moves by how far the finger travels, not to where it lands, so a value
+can be nudged without the thumb covering it; drag below the slider as you go and
+it moves finer, down to a quarter speed. A vertical drag scrolls the panel
+instead. Double-tap any slider to return it to neutral. Where the look's own
+value isn't neutral, a small mark on the track shows where it sits, and every
+section heading has a reset that puts that section back on the look.
+
+Hold **Before**, beside the histogram, to see the frame as it was when it came
+under the sliders; let go to come back. It only changes the screen: a capture
+made while it is held still wears what the sliders say.
+
+The histogram is read off whatever the viewer is drawing, a few times a second,
+and lights a corner triangle when the shadows or highlights clip.
 
 A saved frame that was open in the viewer comes along, as the negative behind
 it rather than as the finished JPEG it was: same square, same subject, but live
@@ -1472,12 +1533,12 @@ It was briefly the label in the corner — the one that used to read VERSION —
 which put an action in the one place on that row reserved for saying what
 something *is*. The corner is a label again, and the button is a button.
 
-**Load Settings** and **Save Settings** sit side by side at the foot of the
-sliders, under the RAW section. Load offers every shot as a card, newest first;
+**Load Settings** and **Save Settings** sit side by side in the RAW tool, under
+its notes. Load offers every shot as a card, newest first;
 tap one to put its settings back on the sliders, swipe to delete. Save captures,
 then asks for a title (defaulting to the timestamp) and a caption, and keeps the
 look with the frame. They are neither ways out of the panel nor sliders, and the
-end of the list is the one place that is neither.
+last tool is the one place that is neither.
 
 Capture and Save both capture, store, and save to the camera roll — the only
 difference is that Save ends at the naming sheet. Both mark the frame as made in
@@ -1891,4 +1952,5 @@ roll. (Focus tap and the rule-of-thirds guide were on this list until they
 weren't; the thumbnail grid the four squares now open is a way of looking at
 the roll rather than a thing on the capture screen.)
 
-Film noise is coming back later.
+Masking and preset styles. The develop panel works on the whole frame, and the
+one look is the only starting point.

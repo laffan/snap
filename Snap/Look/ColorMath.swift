@@ -44,20 +44,22 @@ func luma(_ c: RGB) -> Float {
 
 // MARK: - White balance
 
-/// Warms or cools a colour by pulling the red and blue channels apart.
+/// Warms or cools a colour by pulling the red and blue channels apart, and
+/// tints it by moving green against the other two.
 ///
-/// This is the temperature axis of a white balance: red one way, blue the
-/// other, green left alone — green is the tint axis and nothing here moves it.
-/// `amount` is the fraction each channel is pushed by, positive for warmer.
+/// `amount` is the temperature axis of a white balance: red one way, blue the
+/// other, green left alone — the fraction each channel is pushed by, positive
+/// for warmer. `tint` is the other axis: green down and red and blue up
+/// together for magenta, the reverse for green.
 ///
 /// The gains are divided through by what they do to white, so the frame keeps
 /// its brightness and only its colour moves. White itself doesn't stay white —
-/// that is the whole point of a temperature slider — but it doesn't get lighter
+/// that is the whole point of a white balance — but it doesn't get lighter
 /// or darker on the way.
 @inline(__always)
-func whiteBalanced(_ c: RGB, amount: Float) -> RGB {
-    guard amount != 0 else { return c }
-    let gain = RGB(1 + amount, 1, 1 - amount)
+func whiteBalanced(_ c: RGB, amount: Float, tint: Float = 0) -> RGB {
+    guard amount != 0 || tint != 0 else { return c }
+    let gain = RGB(1 + amount + tint / 2, 1 - tint, 1 - amount + tint / 2)
     let brightness = simd_dot(gain, lumaWeights)
     guard brightness > 0 else { return c }
     return c * (gain / brightness)
@@ -152,6 +154,52 @@ func shiftBlacks(_ c: RGB, by amount: Float) -> RGB {
     return RGB(shiftBlacks(c.x, by: amount),
                shiftBlacks(c.y, by: amount),
                shiftBlacks(c.z, by: amount))
+}
+
+/// Moves the white point without disturbing the midtones: full effect at the
+/// top, faded out by roughly 65% grey. The mirror of `shiftBlacks`.
+@inline(__always)
+func shiftWhites(_ c: RGB, by amount: Float) -> RGB {
+    guard amount != 0 else { return c }
+    func shift(_ x: Float) -> Float { x + amount * smoothstep(0.65, 1, x) }
+    return RGB(shift(c.x), shift(c.y), shift(c.z))
+}
+
+/// Scales every colour's distance from its own grey by the same amount.
+@inline(__always)
+func applySaturation(_ c: RGB, scale: Float) -> RGB {
+    guard scale != 1 else { return c }
+    let grey = RGB(repeating: luma(c))
+    return grey + (c - grey) * scale
+}
+
+/// Takes a haze out, or lays one on.
+///
+/// Haze is light scattered toward the camera on the way, which adds a veil of
+/// near-white to everything in proportion to how far off it is. The darkest
+/// channel of a colour is the best single guess at how much veil it carries —
+/// nothing in a clear scene is lit evenly in all three — so positive amounts
+/// subtract that much of white and stretch what is left back out, which is the
+/// dark-channel prior worked one pixel at a time. Half the brightness that
+/// costs is given back, since a dehazed frame should read clearer, not darker.
+///
+/// Negative amounts lay a cool, pale veil over the frame.
+@inline(__always)
+func dehazed(_ c: RGB, amount: Float) -> RGB {
+    guard amount != 0 else { return c }
+    let white = RGB(repeating: 1)
+    if amount < 0 {
+        let veil = RGB(0.82, 0.84, 0.87)
+        return c + (veil - c) * (-amount * 0.5)
+    }
+    let dark = min(c.x, min(c.y, c.z))
+    let transmission = max(1 - 0.45 * amount * dark, 0.2)
+    let cleared = clamp01((c - white) / transmission + white)
+    let before = luma(c)
+    let after = luma(cleared)
+    guard after > 0.0001 else { return cleared }
+    let restored = clamp01(cleared * (before / after))
+    return cleared + (restored - cleared) * 0.5
 }
 
 /// Saturation boost that backs off on colours that are already saturated, so
